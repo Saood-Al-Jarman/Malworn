@@ -1,0 +1,38 @@
+# === Malware samples: NEVER commit ===
+samples/
+malware/
+*.exe
+*.dll
+*.sys
+*.bin
+*.scr
+*.zip
+*.7z
+*.rar
+
+# === Data and models (too big for GitHub) ===
+data/*
+!data/README.md
+*.pt
+*.pth
+*.safetensors
+*.gguf
+*.ckpt
+checkpoints/
+models/
+
+# === Secrets ===
+.env
+
+# === Python ===
+__pycache__/
+*.pyc
+venv/
+.venv/
+.ipynb_checkpoints/
+
+# === Editors / OS ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
