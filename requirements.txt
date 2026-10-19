@@ -1,0 +1,15 @@
+# Core
+python-dotenv
+numpy
+pandas
+
+# Static analysis
+pefile
+
+# ML
+scikit-learn
+
+# Testing
+pytest
+
+# LLM / agent / app libraries: add here once the team decides on them
