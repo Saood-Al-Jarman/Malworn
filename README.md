@@ -8,7 +8,7 @@ Capstone project, BS Cybersecurity, RIT Dubai (Fall 2026).
 
 | Member | Area | Folder |
 |---|---|---|
-| Saood Aljerman (lead) | LLM agent & fine-tuning | `src/malworn/agent/` |
+| Saood Aljerman | LLM agent & fine-tuning | `src/malworn/agent/` |
 | Ahmed Abd Elaal | Static analysis & feature extraction | `src/malworn/static_analysis/` |
 | Viha Agrawal | Packing / obfuscation detection | `src/malworn/packing/` |
 | Hassan Al-Hasani | ML detection & threat intelligence | `src/malworn/detection/` |
