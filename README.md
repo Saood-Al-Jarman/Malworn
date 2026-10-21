@@ -24,7 +24,7 @@ Mentor: Mohammed M. Al Ani
 ## How it fits together
 
 ```
-sample ──► static_analysis ──► packing ──► detection ──► agent ──► report + chat (app)
+sample ──► static_analysis ──► packing ──► detection ──► agent ──► report + chat
 ```
 
 ## Project layout
