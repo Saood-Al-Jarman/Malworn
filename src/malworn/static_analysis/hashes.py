@@ -1,3 +1,4 @@
+# AI assistance: ChatGPT, October 2026. Used for: implementing file hashing with MD5, SHA-1, and SHA-256. Reviewed and tested by Ahmed.
 import hashlib
 
 def calculate_hashes(file_path):

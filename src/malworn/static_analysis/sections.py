@@ -1,3 +1,4 @@
+# AI assistance: ChatGPT, October 2026. Used for: implementing PE section analysis to extract section names, virtual addresses, sizes, and entropy. Reviewed and tested by Ahmed.
 import pefile
 
 
@@ -9,7 +10,7 @@ def analyze_sections(file_path):
 
         for section in pe.sections:
             section_info = {
-                "name": section.Name.rstrip(b"\x00").decode(
+                "name": section.Name.split(b"\x00")[0].decode(
                     "utf-8", errors="replace"
                 ),
                 "virtual_address": section.VirtualAddress,

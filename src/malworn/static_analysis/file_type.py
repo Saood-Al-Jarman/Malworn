@@ -1,3 +1,4 @@
+# AI assistance: ChatGPT, October 2026. Used for: implementing file type identification using file signatures and PE format validation. Reviewed and tested by Ahmed.
 from pathlib import Path
 import pefile
 
