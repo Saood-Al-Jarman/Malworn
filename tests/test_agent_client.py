@@ -94,6 +94,22 @@ def test_v0_messages_match_the_baseline_format():
     assert json.loads(content.split("\n\n", 1)[1]) == report
 
 
+def test_v1_uses_a_system_prompt_and_is_the_default():
+    report = client.load_report(EXAMPLE_REPORT)
+    messages = client.build_messages(report)  # default version
+
+    assert [m["role"] for m in messages] == ["system", "user"]
+    system = messages[0]["content"]
+    # One rule for each v0 mistake must be present.
+    assert "has NOT been run" in system
+    assert "Indicators are not proof" in system
+    assert "only COMPRESSES" in system
+    assert "unpacking stub" in system
+    assert "never the file name" in system
+    assert "Do not invent" in system
+    assert json.loads(messages[1]["content"].split("\n\n", 1)[1]) == report
+
+
 def test_unknown_prompt_version():
     with pytest.raises(ValueError, match="Unknown prompt version"):
         client.build_messages({}, "v99")
@@ -162,7 +178,7 @@ def test_main_prints_answer_and_saves_run(fake_ollama, tmp_path, capsys):
         DONE,
     ]
     exit_code = client.main(
-        [str(EXAMPLE_REPORT), "--url", fake_ollama, "--save", str(tmp_path), "--hide-thinking"]
+        [str(EXAMPLE_REPORT), "--url", fake_ollama, "--save", str(tmp_path), "--hide-thinking", "--prompt", "v0"]
     )
 
     assert exit_code == 0
