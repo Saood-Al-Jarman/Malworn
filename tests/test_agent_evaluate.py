@@ -116,3 +116,71 @@ def test_main_runs_every_prompt_and_seed(fake_ollama, tmp_path, capsys):
 
 def test_main_rejects_zero_runs(capsys):
     assert evaluate.main([str(ROOT / "examples" / "reports" / "invoice_upx.json"), "--runs", "0"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Real sentences from the first 5-seed run (2026-10-22). Each was flagged by the
+# first version of the checks; the hand review decided whether that was right.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "check, sentence",
+    [
+        # Advice on HOW to confirm is correct, not a claim of proof.
+        ("proof_language", "The analyst should prioritize unpacking and behavioral testing to confirm the threat."),
+        ("proof_language", "Cross-check the hash with known malware databases (e.g., VirusTotal) to confirm if it's a known threat."),
+        ("proof_language", "Unpack the file and analyze its original code. This will help confirm if it's malicious."),
+        # "instead of uploading" is the right advice.
+        ("bad_lookup", "Search the hash (SHA-256) against threat intelligence databases instead of uploading the file to external services."),
+        # Plural "stubs" still means the imports were attributed to the stub.
+        ("stub_imports", "The imports for `VirtualProtect` and `LoadLibraryA` are typical of UPX stubs, not the actual payload."),
+        # Correct general description of entropy, not "UPX encrypts".
+        ("upx_encrypts", "The high entropy (7.91) in UPX1 suggests the data is encrypted or compressed, making it harder to analyze."),
+        ("upx_encrypts", "High entropy (7.91) in `UPX1` (encrypted/compressed data)."),
+    ],
+)
+def test_real_false_alarms_are_not_flagged(check, sentence):
+    assert not evaluate.CHECKS[check][1](sentence, REPORT)
+
+
+@pytest.mark.parametrize(
+    "check, sentence",
+    [
+        ("stub_imports", "`VirtualProtect`: Used to change memory permissions (often for code injection)."),
+        ("stub_imports", "The file imports functions like `VirtualProtect` (used to modify memory) and `LoadLibraryA` (loads DLLs)."),
+        ("assumes_executed", "Use Registry Editor to see if the malware has written itself to the registry."),
+        ("assumes_executed", "Use tools like Process Monitor or Regmon to check if the malware writes to the registry key."),
+        ("bad_lookup", "Check if 'invoice.exe' or its hashes are listed in malware databases."),
+    ],
+)
+def test_real_mistakes_are_still_flagged(check, sentence):
+    assert evaluate.CHECKS[check][1](sentence, REPORT)
+
+
+def test_recheck_rescores_saved_runs_without_the_model(tmp_path, capsys):
+    # A saved run whose flags were computed by an older, buggier check.
+    record = {
+        "prompt_version": "v1",
+        "seed": 4,
+        "seconds": 11.5,
+        "answer": "The imports `VirtualProtect` and `LoadLibraryA` are typical of UPX stubs.",
+        "thinking": "",
+        "stats": {"output_tokens": 743},
+        "flags": {"stub_imports": ["old false alarm"]},
+    }
+    (tmp_path / "invoice_upx_v1_seed4.json").write_text(json.dumps(record))
+
+    code = evaluate.main([str(ROOT / "examples" / "reports" / "invoice_upx.json"),
+                          "--recheck", str(tmp_path), "--url", "http://127.0.0.1:9"])
+    assert code == 0
+
+    updated = json.loads((tmp_path / "invoice_upx_v1_seed4.json").read_text())
+    assert updated["flags"]["stub_imports"] == []
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary["v1"]["clean_runs"] == 1
+    assert summary["v1"]["avg_seconds"] == 11.5
+    assert "**1/1**" in capsys.readouterr().out
+
+
+def test_recheck_empty_folder(tmp_path):
+    assert evaluate.main([str(ROOT / "examples" / "reports" / "invoice_upx.json"),
+                          "--recheck", str(tmp_path)]) == 2

@@ -46,9 +46,9 @@ from malworn.agent.client import (
 from malworn.agent.prompts import PROMPTS
 
 # A match counts as negated when one of these appears earlier in the same
-# sentence, e.g. "does NOT prove", "cannot confirm", "rather than encrypting".
+# sentence, e.g. "does NOT prove", "cannot confirm", "instead of uploading".
 _NEGATION = re.compile(
-    r"(\bnot\b|n't\b|\bnever\b|\bcannot\b|\bno\b|\bwithout\b|rather than|\bnor\b|\bavoid\b)",
+    r"(\bnot\b|n't\b|\bnever\b|\bcannot\b|\bno\b|\bwithout\b|rather than|instead of|\bnor\b|\bavoid\b)",
     re.IGNORECASE,
 )
 _SENTENCE_BREAK = re.compile(r"[.!?\n]")
@@ -90,8 +90,9 @@ def _find(text, pattern, skip_negated=True):
 def check_proof_language(answer, report):
     """Evidence treated as proof: 'confirms', 'proves', 'definitely'...
 
-    Not flagged: confirming something *with dynamic analysis / a sandbox* (that is
-    correct advice), and "confirm ... safe to run" (counted by check_unsafe_sandbox).
+    Not flagged, because these are advice on HOW to confirm, which is correct:
+    "... to confirm the threat", "this will help confirm", confirming with dynamic
+    analysis or a sandbox. "confirm ... safe to run" is counted by check_unsafe_sandbox.
     """
     hits = []
     pattern = r"\b(confirm(s|ed|ing)?|prove[sdn]?|proof|definitely|certainly)\b"
@@ -99,6 +100,8 @@ def check_proof_language(answer, report):
         before = _sentence_before(answer, m.start())
         sentence = before + answer[m.start():_sentence_end(answer, m.end())]
         if _NEGATION.search(before):
+            continue
+        if re.search(r"\b(to|helps?|help you)\s*$", before, re.IGNORECASE):
             continue
         if re.search(r"\b(dynamic|sandbox|safe to)\b", sentence, re.IGNORECASE):
             continue
@@ -125,7 +128,7 @@ def check_stub_imports(answer, report):
     hits = _find(answer, r"\binject(ion|ed|s|ing)?\b")
     mentions_imports = re.search(r"VirtualProtect|LoadLibrary|GetProcAddress|VirtualAlloc", answer)
     is_packed = (report.get("packing") or {}).get("is_packed")
-    if mentions_imports and is_packed and not re.search(r"\bstub\b", answer, re.IGNORECASE):
+    if mentions_imports and is_packed and not re.search(r"\bstubs?\b", answer, re.IGNORECASE):
         m = mentions_imports
         hits.append("imports discussed without saying they belong to the unpacking stub: "
                     + _snippet(answer, m.start(), m.end()))
@@ -140,14 +143,25 @@ def check_bad_lookup(answer, report):
         name = re.escape(file_name)
         hits += _find(
             answer,
-            rf"\b(search|look\s*up|query|check)\b[^.\n]{{0,25}}`?{name}`?\s+(or|in|on)\b",
+            rf"\b(search|look\s*up|query|check)\b[^.\n]{{0,25}}[`'\"]?{name}[`'\"]?\s+(or|in|on|are|is)\b",
         )
     return hits
 
 
 def check_upx_encrypts(answer, report):
-    """Packing described as encryption or as a security feature."""
-    hits = _find(answer, r"\bencrypt(s|ed|ion|ing)?\b")
+    """Packing described as encryption or as a security feature.
+
+    Not flagged: "encrypted or compressed" (a correct general description of
+    high entropy, not a claim that UPX encrypts).
+    """
+    hits = []
+    either = re.compile(r"encrypt\w*\s*(or|/)\s*compress|compress\w*\s*(or|/)\s*encrypt", re.IGNORECASE)
+    for m in re.finditer(r"\bencrypt(s|ed|ion|ing)?\b", answer, re.IGNORECASE):
+        before = _sentence_before(answer, m.start())
+        sentence = before + answer[m.start():_sentence_end(answer, m.end())]
+        if _NEGATION.search(before) or either.search(sentence):
+            continue
+        hits.append(_snippet(answer, m.start(), m.end()))
     hits += _find(answer, r"\b(enhance|improve|increase)s?\b[^.\n]{0,15}\bsecurity\b")
     return hits
 
@@ -220,6 +234,8 @@ def evaluate(report, report_path, prompts, runs, out_dir, url, model, timeout, t
             record = {
                 "report_file": str(report_path),
                 "prompt_version": prompt,
+                "seed": seed,
+                "seconds": seconds,
                 "model": result["model"],
                 "options": options,
                 "messages": messages,
@@ -234,6 +250,27 @@ def evaluate(report, report_path, prompts, runs, out_dir, url, model, timeout, t
             found = [k for k, v in flags.items() if v]
             log(f"[{prompt} seed {seed}/{runs}] {seconds}s, "
                 f"{run.stats.get('output_tokens')} tokens, flags: {', '.join(found) or 'none'}")
+    return results
+
+
+def recheck(run_dir, report):
+    """Re-score saved runs with the current checks (no model calls).
+
+    Use this after improving a check: the answers stay the same, only the flags
+    are recomputed. Each run file's "flags" field is updated in place.
+    """
+    results = []
+    for path in sorted(Path(run_dir).glob("*_seed*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        seed = record.get("seed") or int(re.search(r"_seed(\d+)\.json$", path.name).group(1))
+        stats = record.get("stats") or {}
+        seconds = record.get("seconds") or stats.get("total_seconds") or 0
+        flags = run_checks(record["answer"], report)
+        record["flags"] = flags
+        path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+        results.append(RunResult(record["prompt_version"], seed, record["answer"],
+                                 record.get("thinking", ""), stats, flags, seconds))
+    results.sort(key=lambda r: (r.prompt, r.seed))
     return results
 
 
@@ -304,6 +341,8 @@ def parse_args(argv=None):
     parser.add_argument("--model", default=os.environ.get("MALWORN_MODEL", DEFAULT_MODEL))
     parser.add_argument("--no-think", action="store_true", help="turn off Qwen's thinking mode")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument("--recheck", metavar="DIR",
+                        help="re-score the saved runs in DIR with the current checks (no model calls)")
     return parser.parse_args(argv)
 
 
@@ -317,6 +356,16 @@ def main(argv=None):
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    if args.recheck:
+        out_dir = Path(args.recheck)
+        results = recheck(out_dir, report)
+        if not results:
+            print(f"error: no *_seed*.json runs found in {out_dir}", file=sys.stderr)
+            return 2
+        prompts = sorted({r.prompt for r in results})
+        print(f"[malworn] rechecked {len(results)} saved runs in {out_dir}", file=sys.stderr)
+        return _write_and_print(out_dir, results, prompts, args)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_dir = Path(args.out or f"runs/eval_{stamp}")
@@ -332,9 +381,13 @@ def main(argv=None):
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    summary = summarize(results, args.prompts, args.runs)
+    return _write_and_print(out_dir, results, args.prompts, args)
+
+
+def _write_and_print(out_dir, results, prompts, args):
+    summary = summarize(results, prompts, None)
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    write_summary_md(out_dir / "summary.md", summary, results, args.prompts, args.report, args.model)
+    write_summary_md(out_dir / "summary.md", summary, results, prompts, args.report, args.model)
 
     # Print the table part of summary.md.
     table = (out_dir / "summary.md").read_text(encoding="utf-8").split("## What triggered")[0]
