@@ -16,7 +16,7 @@ def analyze_imports(file_path):
             ]
         )
 
-        dlls = {}
+        dlls = []
         function_count = 0
 
         all_imports = list(getattr(pe, "DIRECTORY_ENTRY_IMPORT", []))
@@ -37,7 +37,10 @@ def analyze_imports(file_path):
 
                 functions.append(function_name)
 
-            dlls[dll_name] = functions
+            dlls.append({
+                "dll": dll_name,
+                "functions": functions,
+            })
             function_count += len(functions)
 
         return {

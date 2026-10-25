@@ -57,18 +57,27 @@ def test_analyze_imports_extracts_dlls_and_functions(monkeypatch):
 
     assert result["dll_count"] == 3
     assert result["function_count"] == 6
-    assert result["dlls"] == {
-        "KERNEL32.dll": [
+    assert result["dlls"] == [
+    {
+        "dll": "KERNEL32.dll",
+        "functions": [
             "CreateFileW",
             "ReadFile",
             "ordinal_123",
         ],
-        "USER32.dll": ["MessageBoxW"],
-        "DELAYED.dll": [
+    },
+    {
+        "dll": "USER32.dll",
+        "functions": ["MessageBoxW"],
+    },
+    {
+        "dll": "DELAYED.dll",
+        "functions": [
             "DelayedFunction",
             "ordinal_456",
         ],
-    }
+    },
+]
 
 def test_analyze_imports_rejects_invalid_file(tmp_path):
     sample = tmp_path / "invalid.exe"
