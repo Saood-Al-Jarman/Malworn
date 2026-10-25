@@ -29,3 +29,19 @@ def identify_file_type(file_path):
         return "ZIP archive"
 
     return "Unknown file type"
+
+def run(file_path):
+    """Wrap identify_file_type as an aggregator-ready tool result."""
+    try:
+        data = identify_file_type(file_path)
+    except Exception as exc:
+        return {
+            "tool": "file_type",
+            "status": "failure",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "tool": "file_type",
+        "status": "success",
+        "data": {"description": data},
+    }

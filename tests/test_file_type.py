@@ -1,5 +1,7 @@
 from malworn.static_analysis.file_type import identify_file_type
 from pathlib import Path
+from malworn.static_analysis.file_type import run
+
 import os
 import pytest
 
@@ -44,3 +46,21 @@ def test_invalid_pe_detection(tmp_path):
     test_file.write_bytes(b"MZ" + b"\x00" * 100)
 
     assert identify_file_type(test_file) == "MZ file (not a valid PE)"
+
+def test_run_wraps_success(tmp_path):
+    sample = tmp_path / "sample.pdf"
+    sample.write_bytes(b"%PDF-1.4\n...")
+
+    result = run(sample)
+
+    assert result["tool"] == "file_type"
+    assert result["status"] == "success"
+    assert result["data"]["description"] == "PDF document"
+
+
+def test_run_wraps_missing_file_as_failure():
+    result = run("does_not_exist.bin")
+
+    assert result["tool"] == "file_type"
+    assert result["status"] == "failure"
+    assert "error" in result

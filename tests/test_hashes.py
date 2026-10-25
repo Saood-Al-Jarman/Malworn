@@ -3,6 +3,7 @@ import pytest
 
 
 from malworn.static_analysis.hashes import calculate_sha256, calculate_hashes
+from malworn.static_analysis.hashes import run
 
 def test_calculate_sha256(tmp_path):
     test_file = tmp_path / "sample.txt"
@@ -40,3 +41,21 @@ def test_calculate_hashes_large_file(tmp_path):
     assert results["md5"] == hashlib.md5(content).hexdigest()
     assert results["sha1"] == hashlib.sha1(content).hexdigest()
     assert results["sha256"] == hashlib.sha256(content).hexdigest()
+
+def test_run_wraps_success(tmp_path):
+    sample = tmp_path / "sample.bin"
+    sample.write_bytes(b"hello world")
+
+    result = run(sample)
+
+    assert result["tool"] == "hashes"
+    assert result["status"] == "success"
+    assert "sha256" in result["data"]
+
+
+def test_run_wraps_missing_file_as_failure():
+    result = run("does_not_exist.bin")
+
+    assert result["tool"] == "hashes"
+    assert result["status"] == "failure"
+    assert "error" in result

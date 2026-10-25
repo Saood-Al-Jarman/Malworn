@@ -37,3 +37,19 @@ def analyze_strings(file_path, min_length=MIN_STRING_LENGTH):
         "string_count": len(strings),
         "strings": strings,
     }
+
+def run(file_path):
+    """Wrap analyze_strings as an aggregator-ready tool result."""
+    try:
+        data = analyze_strings(file_path)
+    except Exception as exc:
+        return {
+            "tool": "strings",
+            "status": "failure",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "tool": "strings",
+        "status": "success",
+        "data": data,
+    }

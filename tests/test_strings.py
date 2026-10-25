@@ -2,6 +2,7 @@
 import pytest
 
 from malworn.static_analysis.strings import analyze_strings
+from malworn.static_analysis.strings import run
 
 
 def test_analyze_strings_extracts_ascii_strings(tmp_path):
@@ -59,3 +60,21 @@ def test_analyze_strings_count_matches_results(tmp_path):
     result = analyze_strings(sample)
 
     assert result["string_count"] == len(result["strings"])
+
+def test_run_wraps_success(tmp_path):
+    sample = tmp_path / "sample.bin"
+    sample.write_bytes(b"hello world this is a test file")
+
+    result = run(sample)
+
+    assert result["tool"] == "strings"
+    assert result["status"] == "success"
+    assert result["data"]["string_count"] == len(result["data"]["strings"])
+
+
+def test_run_wraps_missing_file_as_failure():
+    result = run("does_not_exist.bin")
+
+    assert result["tool"] == "strings"
+    assert result["status"] == "failure"
+    assert "error" in result

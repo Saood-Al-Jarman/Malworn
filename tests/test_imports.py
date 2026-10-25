@@ -3,6 +3,7 @@ import pefile
 import pytest
 
 from malworn.static_analysis.imports import analyze_imports
+from malworn.static_analysis.imports import run
 
 
 class FakeImport:
@@ -85,3 +86,24 @@ def test_analyze_imports_rejects_invalid_file(tmp_path):
 
     with pytest.raises(pefile.PEFormatError):
         analyze_imports(sample)
+
+def test_run_wraps_success(monkeypatch):
+    monkeypatch.setattr(pefile, "PE", FakePE)
+
+    result = run("fake.exe")
+
+    assert result["tool"] == "imports"
+    assert result["status"] == "success"
+    assert result["data"]["dll_count"] == 3
+    assert result["data"]["function_count"] == 6
+
+
+def test_run_wraps_invalid_file_as_failure(tmp_path):
+    sample = tmp_path / "invalid.exe"
+    sample.write_bytes(b"not a valid Windows executable")
+
+    result = run(sample)
+
+    assert result["tool"] == "imports"
+    assert result["status"] == "failure"
+    assert "error" in result

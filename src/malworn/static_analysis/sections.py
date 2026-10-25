@@ -25,3 +25,19 @@ def analyze_sections(file_path):
 
     finally:
         pe.close()
+
+def run(file_path):
+    """Wrap analyze_sections as an aggregator-ready tool result."""
+    try:
+        data = analyze_sections(file_path)
+    except Exception as exc:
+        return {
+            "tool": "sections",
+            "status": "failure",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "tool": "sections",
+        "status": "success",
+        "data": {"sections": data},
+    }

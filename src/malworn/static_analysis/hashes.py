@@ -25,3 +25,19 @@ def calculate_hashes(file_path):
 
 def calculate_sha256(file_path):
     return calculate_hashes(file_path)["sha256"]
+
+def run(file_path):
+    """Wrap calculate_hashes as an aggregator-ready tool result."""
+    try:
+        data = calculate_hashes(file_path)
+    except Exception as exc:
+        return {
+            "tool": "hashes",
+            "status": "failure",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "tool": "hashes",
+        "status": "success",
+        "data": data,
+    }

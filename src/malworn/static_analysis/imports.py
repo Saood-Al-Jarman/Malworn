@@ -50,3 +50,19 @@ def analyze_imports(file_path):
         }
     finally:
         pe.close()
+
+def run(file_path):
+    """Wrap analyze_imports as an aggregator-ready tool result."""
+    try:
+        data = analyze_imports(file_path)
+    except Exception as exc:
+        return {
+            "tool": "imports",
+            "status": "failure",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "tool": "imports",
+        "status": "success",
+        "data": data,
+    }
