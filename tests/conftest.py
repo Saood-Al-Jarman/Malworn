@@ -11,6 +11,7 @@ import pytest
 # ---------------------------------------------------------------------------
 class FakeOllama(BaseHTTPRequestHandler):
     chunks = []       # list of dicts streamed back, one JSON object per line
+    script = []       # optional: one chunk list per request, used in order
     received = []     # request bodies the server got
     status = 200
 
@@ -23,7 +24,8 @@ class FakeOllama(BaseHTTPRequestHandler):
         if FakeOllama.status != 200:
             self.wfile.write(b'{"error": "model not found"}')
             return
-        for chunk in FakeOllama.chunks:
+        chunks = FakeOllama.script.pop(0) if FakeOllama.script else FakeOllama.chunks
+        for chunk in chunks:
             self.wfile.write((json.dumps(chunk) + "\n").encode())
 
     def log_message(self, *args):
@@ -32,7 +34,7 @@ class FakeOllama(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def fake_ollama():
-    FakeOllama.chunks, FakeOllama.received, FakeOllama.status = [], [], 200
+    FakeOllama.chunks, FakeOllama.script, FakeOllama.received, FakeOllama.status = [], [], [], 200
     server = HTTPServer(("127.0.0.1", 0), FakeOllama)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

@@ -98,13 +98,16 @@ def chat(
     think=True,
     timeout=DEFAULT_TIMEOUT,
     on_token=None,
+    tools=None,
 ):
     """Send messages to Ollama's /api/chat and return the full result.
 
     Streams the response so long answers don't look frozen. ``on_token`` is
     called as ``on_token(kind, text)`` with kind "thinking" or "answer".
+    ``tools`` is an optional list of Ollama tool definitions; any tool calls
+    the model makes are returned in "tool_calls".
 
-    Returns a dict: {"answer", "thinking", "model", "stats"}.
+    Returns a dict: {"answer", "thinking", "tool_calls", "model", "stats"}.
     """
     url = base_url.rstrip("/") + "/api/chat"
     body = {
@@ -114,6 +117,8 @@ def chat(
         "think": think,
         "options": dict(DEFAULT_OPTIONS if options is None else options),
     }
+    if tools:
+        body["tools"] = tools
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -121,7 +126,7 @@ def chat(
         method="POST",
     )
 
-    thinking_parts, answer_parts, final = [], [], {}
+    thinking_parts, answer_parts, tool_calls, final = [], [], [], {}
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             for raw_line in response:
@@ -140,6 +145,8 @@ def chat(
                     answer_parts.append(message["content"])
                     if on_token:
                         on_token("answer", message["content"])
+                if message.get("tool_calls"):
+                    tool_calls.extend(message["tool_calls"])
                 if chunk.get("done"):
                     final = chunk
                     break
@@ -164,6 +171,7 @@ def chat(
     return {
         "answer": answer,
         "thinking": thinking,
+        "tool_calls": tool_calls,
         "model": final.get("model", model),
         "stats": _stats(final),
     }
