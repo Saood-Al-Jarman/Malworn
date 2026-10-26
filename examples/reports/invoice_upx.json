@@ -1,0 +1,38 @@
+{
+  "sample": {
+    "file_name": "invoice.exe"
+  },
+  "packing": {
+    "is_packed": true,
+    "packer_name": "UPX",
+    "evidence": [
+      "Section names UPX0 and UPX1",
+      "UPX1 entropy 7.91"
+    ]
+  },
+  "detection": {
+    "verdict": "malicious",
+    "confidence": 0.91,
+    "threat_intel": {
+      "mitre_techniques": [
+        {
+          "id": "T1547.001",
+          "name": "Registry Run Keys"
+        }
+      ]
+    }
+  },
+  "static_analysis": {
+    "imports": {
+      "kernel32.dll": [
+        "VirtualProtect",
+        "LoadLibraryA"
+      ]
+    },
+    "strings": {
+      "registry_keys": [
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+      ]
+    }
+  }
+}
