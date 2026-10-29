@@ -9,10 +9,13 @@ import types
 import pytest
 
 from malworn.agent import loop, tools as agent_tools
-from malworn.agent.prompts import AGENT_A1_SYSTEM
+from malworn.agent.prompts import AGENT_A2_SYSTEM
 from malworn.contract import ToolSpec
 
 from tests.conftest import DONE, FakeOllama
+
+
+ALL_TOOLS = ["hashes", "file_type", "packing_indicators", "packer_signatures", "sections", "imports", "strings", "extra_checks", "version_info"]
 
 
 def call(*names):
@@ -49,13 +52,13 @@ def test_model_chooses_tools_then_answers(fake_ollama, sample):
 
     agent_run = outcome["agent_run"]
     assert agent_run["selected_tools"] == ["hashes", "sections"]
-    assert agent_run["available_tools"] == ["hashes", "file_type", "sections", "imports", "strings"]
+    assert agent_run["available_tools"] == ALL_TOOLS
     assert outcome["explanation"] == "## Summary\nNot a PE [file_type]."
 
     summary = outcome["report"]["execution_summary"]
     assert summary["successful_calls"] == 1                      # hashes
     assert [f["tool"] for f in summary["failed_calls"]] == ["sections"]  # not a PE
-    assert summary["not_selected_tools"] == ["file_type", "imports", "strings"]
+    assert summary["not_selected_tools"] == [t for t in ALL_TOOLS if t not in ("hashes", "sections")]
     assert outcome["report"]["agent_commentary"]["text"] == outcome["explanation"]
     assert outcome["stats"]["model_turns"] == 3
 
@@ -65,10 +68,9 @@ def test_what_the_model_is_sent(fake_ollama, sample):
     run(sample, fake_ollama)
     first, second = FakeOllama.received
 
-    assert first["messages"][0] == {"role": "system", "content": AGENT_A1_SYSTEM}
+    assert first["messages"][0] == {"role": "system", "content": AGENT_A2_SYSTEM}
     assert '"file_name": "invoice.exe"' in first["messages"][1]["content"]
-    assert [t["function"]["name"] for t in first["tools"]] == [
-        "hashes", "file_type", "sections", "imports", "strings"]
+    assert [t["function"]["name"] for t in first["tools"]] == ALL_TOOLS
     assert first["tools"][0]["function"]["parameters"] == {"type": "object", "properties": {}, "required": []}
     assert first["options"]["num_ctx"] == loop.DEFAULT_NUM_CTX
 
@@ -173,11 +175,10 @@ def test_file_name_is_quoted_as_data():
 # ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
-def test_registry_skips_tools_that_are_not_built_yet():
+def test_registry_loads_every_merged_tool_and_skips_unbuilt_ones():
     tools, skipped = agent_tools.load_tools()
-    assert [t.name for t in tools] == ["hashes", "file_type", "sections", "imports", "strings"]
-    assert {m for m, _ in skipped} == {"malworn.packing.packing_indicators",
-                                       "malworn.detection.virustotal"}
+    assert [t.name for t in tools] == ALL_TOOLS
+    assert skipped == [("malworn.detection.virustotal", "not built yet")]
 
 
 def test_a_spec_in_the_tool_module_wins_over_the_fallback(monkeypatch):
@@ -222,3 +223,60 @@ def test_main_writes_the_report_files(fake_ollama, sample, tmp_path, capsys):
 
 def test_main_missing_file(capsys, tmp_path):
     assert loop.main([str(tmp_path / "nope.exe")]) == 2
+
+
+# ---------------------------------------------------------------------------
+# All nine real tools on a UPX-like packed file (built in code, harmless)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def packed_sample(tmp_path, monkeypatch):
+    from malworn.packing import die
+    from tests.test_packing_indicators import upx_with_real_stub
+    # Detect It Easy isn't installed here; make it "not found" the same way every run
+    monkeypatch.setenv("MALWORN_DIEC", str(tmp_path / "no-diec"))
+    die.clear_cache()
+    path = tmp_path / "packed.exe"
+    path.write_bytes(upx_with_real_stub())
+    return path
+
+
+def test_every_real_tool_runs_on_a_packed_file(fake_ollama, packed_sample):
+    FakeOllama.script = [call(*ALL_TOOLS), answer("## Summary\nPacking likely [packing_indicators].")]
+    outcome = run(packed_sample, fake_ollama)
+
+    by_tool = {r["tool"]: r for r in outcome["agent_run"]["tool_results"]}
+    assert set(by_tool) == set(ALL_TOOLS)
+    assert all(r["status"] == "success" for r in by_tool.values()), \
+        {t: r["error"] for t, r in by_tool.items() if r["status"] != "success"}
+    packing = by_tool["packing_indicators"]["data"]
+    assert packing["needs_unpacking"] is True
+    assert packing["packing_level"] == "likely"
+    assert outcome["report"]["execution_summary"]["failed_call_count"] == 0
+
+    # every result the model saw fits the size limit
+    tool_messages = [m for m in FakeOllama.received[1]["messages"] if m["role"] == "tool"]
+    assert len(tool_messages) == len(ALL_TOOLS)
+    assert all(len(m["content"]) <= loop.MAX_RESULT_CHARS + 40 for m in tool_messages)
+
+
+def test_the_model_gets_a_focused_view_of_packing_results(fake_ollama, packed_sample):
+    FakeOllama.script = [call("packing_indicators"), answer("done")]
+    outcome = run(packed_sample, fake_ollama)
+
+    sent = json.loads(FakeOllama.received[1]["messages"][-1]["content"])
+    assert set(sent["data"]) == set(agent_tools.MODEL_VIEWS["packing_indicators"])
+    assert "message_for_analyst" in sent["not_shown_here"]
+    assert sent["data"]["evidence_for"], "the evidence itself must reach the model"
+    # the report keeps the full result
+    full = outcome["agent_run"]["tool_results"][0]["data"]
+    assert "message_for_analyst" in full and "thresholds_used" in full
+
+
+def test_pe_tools_on_a_non_pe_file_fail_or_skip_with_a_reason(fake_ollama, sample):
+    FakeOllama.script = [call("extra_checks", "version_info", "packing_indicators"), answer("done")]
+    outcome = run(sample, fake_ollama)
+    by_tool = {r["tool"]: r for r in outcome["agent_run"]["tool_results"]}
+    assert by_tool["extra_checks"]["status"] == "failure"
+    assert by_tool["version_info"]["status"] == "failure"
+    assert by_tool["packing_indicators"]["status"] == "skipped"
+    assert all(r["error"] for r in by_tool.values())

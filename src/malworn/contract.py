@@ -157,6 +157,7 @@ def run_tool(spec, run, file_path, call_id=None):
     - accepts a ToolResult or a plain dict from run()
     - converts "ok"/"error" to "success"/"failure", adds missing warnings
     - fills missing data keys with None; unknown keys make it a failure
+    - gives a failure/skipped result without an error message the reason it reported
     - turns any exception into a "failure" result instead of crashing
     """
     started = time.perf_counter()
@@ -176,6 +177,10 @@ def run_tool(spec, run, file_path, call_id=None):
             raise TypeError("data must be a dict")
         if result.status == STATUS_SUCCESS:
             result.data = _complete(spec, result.data)
+        elif not result.error:
+            # e.g. {"status": "skipped", "data": {"reason": "not a PE"}}: keep the reason as the error
+            result.error = (result.data.get("reason") or (result.warnings or [None])[0]
+                            or f"tool reported {result.status} without a reason")
         result.tool_version = spec.version
     except Exception as exc:  # noqa: BLE001 - turning any failure into data is the point
         result = failure(spec, f"{type(exc).__name__}: {exc}")

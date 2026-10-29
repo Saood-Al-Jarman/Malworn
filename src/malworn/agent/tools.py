@@ -13,14 +13,17 @@ import importlib
 
 from malworn.contract import ToolSpec, tool_catalogue
 
-# Order matters only for display: it's the order the model sees.
+# The order the model sees them in, roughly the order an analyst works in.
 TOOL_MODULES = [
     "malworn.static_analysis.hashes",
     "malworn.static_analysis.file_type",
+    "malworn.packing.packing_indicators",
+    "malworn.packing.packer_signatures",
     "malworn.static_analysis.sections",
     "malworn.static_analysis.imports",
     "malworn.static_analysis.strings",
-    "malworn.packing.packing_indicators",   # Viha, not built yet
+    "malworn.static_analysis.extra_checks",
+    "malworn.static_analysis.version_info",
     "malworn.detection.virustotal",         # Hassan, not built yet
 ]
 
@@ -60,6 +63,53 @@ FALLBACK_SPECS = {
         data_keys=("string_count", "strings"),
         requirement="FR4", owner="Ahmed",
     ),
+    "malworn.static_analysis.extra_checks": ToolSpec(
+        name="extra_checks",
+        description=("Check whether the PE file has an overlay (data appended after the last section) "
+                     "and its size, and compute the imphash, a fingerprint of the import list that "
+                     "can link related samples. Only works on Windows PE files."),
+        data_keys=("has_overlay", "overlay_size", "imphash"),
+        requirement="FR4", owner="Ahmed",
+    ),
+    "malworn.static_analysis.version_info": ToolSpec(
+        name="version_info",
+        description=("Read the PE file's version resource (company, product, description, version), "
+                     "count its embedded resources, and report whether a digital signature is present "
+                     "(presence only; the signature is not verified). Only works on Windows PE files."),
+        data_keys=("version_info", "resource_count", "has_signature"),
+        requirement="FR4", owner="Ahmed",
+    ),
+    "malworn.packing.packing_indicators": ToolSpec(
+        name="packing_indicators",
+        description=("Measure packing and obfuscation indicators (entropy, section layout, section names, "
+                     "entry point, imports, Detect It Easy) for the file and each section, with every piece "
+                     "of evidence for and against packing, a score, and whether the imports and strings "
+                     "can be trusted. Only works on Windows PE files."),
+        data_keys=("summary", "final_assessment", "packing_level", "needs_unpacking", "score",
+                   "static_evidence_reliability", "packer_classification", "per_section",
+                   "evidence_for", "evidence_weak", "counter_evidence", "observations",
+                   "high_entropy_regions", "checks_run", "thresholds_used", "message_for_analyst"),
+        requirement="FR5", owner="Viha",
+    ),
+    "malworn.packing.packer_signatures": ToolSpec(
+        name="packer_signatures",
+        description=("Look for signatures that name a packer: Detect It Easy results, known packer section "
+                     "names (like UPX0), byte patterns at the entry point, and local YARA rules."),
+        data_keys=("detect_it_easy", "pe_checks", "section_name_matches", "bundled_signature_matches",
+                   "suspected_packers", "local_yara", "final_assessment", "summary"),
+        requirement="FR5", owner="Viha",
+    ),
+}
+
+# Some tools return more than the model needs in order to reason. For these,
+# the model is sent only the listed keys (the report still keeps everything).
+# packing_indicators: message_for_analyst repeats evidence_for as prose, and the
+# thresholds, weak evidence and entropy regions add length without changing
+# what the model should say.
+MODEL_VIEWS = {
+    "packing_indicators": ("summary", "packing_level", "score", "needs_unpacking",
+                           "static_evidence_reliability", "packer_classification", "per_section",
+                           "evidence_for", "counter_evidence", "checks_run"),
 }
 
 
@@ -70,6 +120,7 @@ class Tool:
         self.spec = spec
         self.run = run
         self.module = module
+        self.model_keys = MODEL_VIEWS.get(spec.name)
 
     @property
     def name(self):

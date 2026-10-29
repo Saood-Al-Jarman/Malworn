@@ -94,21 +94,29 @@ def _shrink(value, notes, cap, path="data"):
     return value
 
 
-def result_for_model(result):
+def result_for_model(result, model_keys=None):
     """The JSON text the model receives for one tool result: the whole result
     if it fits in MAX_RESULT_CHARS, otherwise long lists are shortened (with a
-    note saying so) until it fits."""
+    note saying so) until it fits. ``model_keys`` limits the data to those keys
+    (see agent.tools.MODEL_VIEWS)."""
+    data = result.data
+    omitted = []
+    if model_keys and isinstance(data, dict):
+        omitted = [k for k in data if k not in model_keys]
+        data = {k: v for k, v in data.items() if k in model_keys}
     for cap in LIST_CAPS:
         notes = []
         view = {
             "tool": result.tool,
             "status": result.status,
-            "data": _shrink(result.data, notes, cap),
+            "data": _shrink(data, notes, cap),
             "warnings": result.warnings,
             "error": result.error,
         }
         if notes:
             view["truncated"] = list(dict.fromkeys(notes))
+        if omitted:
+            view["not_shown_here"] = omitted
         text = json.dumps(view, ensure_ascii=False)
         if len(text) <= MAX_RESULT_CHARS:
             return text
@@ -207,7 +215,7 @@ def run_agent(
                 repeat_calls.append(name)
                 emit("repeat_call", name)
                 content = ('{"note": "This tool was already called; its result does not change."} '
-                           + result_for_model(results[name]))
+                           + result_for_model(results[name], by_name[name].model_keys))
             else:
                 emit("tool_call", name)
                 result = run_tool(by_name[name].spec, by_name[name].run, path,
@@ -215,7 +223,7 @@ def run_agent(
                 results[name] = result
                 selected.append(name)
                 emit("tool_result", result)
-                content = result_for_model(result)
+                content = result_for_model(result, by_name[name].model_keys)
             messages.append({"role": "tool", "tool_name": name or "unknown", "content": content})
 
         if calls_made >= max_tool_calls:
