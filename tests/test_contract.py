@@ -10,7 +10,8 @@ import pytest
 from malworn import contract
 from malworn.contract import ToolResult, ToolSpec
 from malworn.detection.malworn_aggregator import aggregate_agent_run, aggregate_results
-from malworn.static_analysis import file_type, hashes, imports, sections, strings
+from malworn.packing import packer_signatures, packing_indicators
+from malworn.static_analysis import extra_checks, file_type, hashes, imports, sections, strings, version_info
 
 DOC = Path(__file__).resolve().parents[1] / "docs" / "data-format.md"
 
@@ -173,7 +174,9 @@ def test_validate_checks_status_error_and_keys():
 # Ahmed's real tools fit the contract and the doc
 # ---------------------------------------------------------------------------
 TOOLS = {"hashes": hashes, "file_type": file_type, "sections": sections,
-         "imports": imports, "strings": strings}
+         "imports": imports, "strings": strings, "extra_checks": extra_checks,
+         "version_info": version_info, "packing_indicators": packing_indicators,
+         "packer_signatures": packer_signatures}
 
 
 @pytest.fixture
@@ -183,7 +186,7 @@ def not_a_pe(tmp_path):
     return path
 
 
-@pytest.mark.parametrize("name", ["hashes", "file_type", "strings"])
+@pytest.mark.parametrize("name", ["hashes", "file_type", "strings", "packer_signatures"])
 def test_real_tools_that_work_on_any_file_match_the_doc(name, not_a_pe):
     spec = doc_specs()[name]
     result = contract.run_tool(spec, TOOLS[name].run, not_a_pe)
@@ -191,13 +194,39 @@ def test_real_tools_that_work_on_any_file_match_the_doc(name, not_a_pe):
     assert contract.validate(result, spec) == []
 
 
-@pytest.mark.parametrize("name", ["sections", "imports"])
+@pytest.mark.parametrize("name", ["sections", "imports", "extra_checks", "version_info"])
 def test_real_pe_tools_fail_cleanly_on_a_non_pe_file(name, not_a_pe):
     spec = doc_specs()[name]
     result = contract.run_tool(spec, TOOLS[name].run, not_a_pe)
     assert result.status == "failure"
     assert "PEFormatError" in result.error
     assert contract.validate(result, spec) == []
+
+
+def test_packing_indicators_skips_a_non_pe_file_with_a_reason(not_a_pe):
+    spec = doc_specs()["packing_indicators"]
+    result = contract.run_tool(spec, packing_indicators.run, not_a_pe)
+    assert result.status == "skipped"
+    assert result.error  # taken from the reason the tool reported
+    assert contract.validate(result, spec) == []
+
+
+def test_real_tools_on_a_packed_pe_match_the_doc(tmp_path):
+    from tests.test_packing_indicators import upx_with_real_stub
+    path = tmp_path / "packed.exe"
+    path.write_bytes(upx_with_real_stub())
+    specs = doc_specs()
+    for name in ("extra_checks", "version_info", "packing_indicators", "packer_signatures"):
+        result = contract.run_tool(specs[name], TOOLS[name].run, path)
+        assert result.status == "success", (name, result.error)
+        assert contract.validate(result, specs[name]) == [], name
+
+
+def test_agent_fallback_specs_match_the_doc():
+    from malworn.agent.tools import FALLBACK_SPECS
+    specs = doc_specs()
+    for spec in FALLBACK_SPECS.values():
+        assert set(spec.data_keys) == set(specs[spec.name].data_keys), spec.name
 
 
 def test_real_sections_and_imports_output_match_the_doc(monkeypatch):
@@ -234,7 +263,8 @@ def test_run_tool_results_are_accepted_by_the_aggregator(not_a_pe):
 # ---------------------------------------------------------------------------
 def test_doc_catalogue_lists_every_tool():
     assert set(doc_specs()) == {"hashes", "file_type", "sections", "imports", "strings",
-                                "packing_indicators", "virustotal"}
+                                "extra_checks", "version_info", "packing_indicators",
+                                "packer_signatures", "virustotal"}
 
 
 def test_doc_example_results_follow_the_contract():
@@ -246,7 +276,7 @@ def test_doc_example_results_follow_the_contract():
 def test_doc_example_run_goes_through_the_aggregator():
     report = aggregate_agent_run(doc_example_run())
     summary = report["execution_summary"]
-    assert summary["not_selected_tools"] == ["strings"]
+    assert summary["not_selected_tools"] == ["packing_indicators", "packer_signatures", "strings", "version_info"]
     assert summary["missing_results"] == []
     assert summary["successful_calls"] == 6
     text = json.dumps(report).lower()
