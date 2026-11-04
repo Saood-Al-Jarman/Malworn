@@ -147,6 +147,21 @@ def test_validate_rejects_verdict_words_in_warnings(warning):
     assert any("verdict words" in p for p in contract.validate(result, SPEC))
 
 
+@pytest.mark.parametrize("warning", [
+    "No VirusTotal record is not evidence that a file is safe",
+    "Packing alone never makes a file malicious",
+    "Zero detections doesn't mean the file is clean",
+])
+def test_validate_allows_negated_verdict_words(warning):
+    result = contract.success(SPEC, {}, warnings=[warning])
+    assert contract.validate(result, SPEC) == []
+
+
+def test_negation_in_an_earlier_sentence_does_not_count():
+    result = contract.success(SPEC, {}, warnings=["Not signed. The file is malicious"])
+    assert any("verdict words" in p for p in contract.validate(result, SPEC))
+
+
 def test_validate_accepts_factual_warnings():
     result = contract.success(SPEC, {}, warnings=["Section UPX1 has entropy 7.91",
                                                   "Both sections are writable and executable"])
@@ -220,6 +235,11 @@ def test_real_tools_on_a_packed_pe_match_the_doc(tmp_path):
         result = contract.run_tool(specs[name], TOOLS[name].run, path)
         assert result.status == "success", (name, result.error)
         assert contract.validate(result, specs[name]) == [], name
+
+
+def test_virustotal_spec_matches_the_doc():
+    from malworn.agent.vt_tool import SPEC as VT_SPEC
+    assert set(VT_SPEC.data_keys) == set(doc_specs()["virustotal"].data_keys)
 
 
 def test_agent_fallback_specs_match_the_doc():

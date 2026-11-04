@@ -1,6 +1,6 @@
 # Malworn Data Format
 
-**Version:** 0.3.1 (draft, open for team review)
+**Version:** 0.3.2 (draft, open for team review)
 **Owner:** Saood
 **Code:** [`src/malworn/contract.py`](../src/malworn/contract.py) (what tools return) and Hassan's [`src/malworn/detection/malworn_aggregator.py`](../src/malworn/detection/malworn_aggregator.py) (the report). `tests/test_contract.py` checks this document against both, so if the doc and the code disagree, the tests fail.
 
@@ -198,18 +198,21 @@ The agent sends the model a shorter view of this result (see `MODEL_VIEWS` in `a
 | `final_assessment` | object or null | Same as in `packing_indicators`, when the PE checks ran |
 | `summary` | string | One line for the analyst |
 
-### `virustotal`: Hassan, FR3, not built yet (proposal)
+### `virustotal`: Hassan (lookup) and Saood (bridge), FR3, built
+
+The VM has no internet, so the agent's `virustotal` tool (`agent/vt_tool.py`) hashes the sample in the VM and sends only the SHA-256 to a bridge on the Windows host (`agent/vt_bridge.py`), which runs Hassan's lookup (`detection/virustotal_tool.py`) with the API key that lives on Windows. See `docs/demo.md`.
 
 | Key | Type | Meaning |
 |---|---|---|
+| `sha256` | string | The hash that was looked up |
 | `found` | bool or null | Whether VirusTotal knows this SHA-256 (`null` if the lookup failed) |
-| `detections` | int or null | Engines that flagged the file in VirusTotal's last analysis |
+| `detections` | int or null | Engines that flagged the file in VirusTotal's last analysis (malicious + suspicious) |
 | `engines_total` | int or null | Engines in that analysis |
 | `first_seen` | string or null | First submission date on VirusTotal, ISO 8601 |
 | `last_analysis_date` | string or null | ISO 8601 |
 | `threat_label` | string or null | VirusTotal's popular threat label (VirusTotal's opinion, reported as such) |
 | `permalink` | string or null | Link to the VirusTotal page for the hash |
-| `source` | string | `"live"`, `"cache"` or `"mock"` (mock mode lets us work without an API key) |
+| `source` | string | `"api"` (live), `"cache"`, `"mock"` or `"none"` |
 
 These match the field names in Hassan's report generator. They are facts *about VirusTotal's results*, credited to VirusTotal: "41 of 72 VirusTotal engines flag this hash" is a fact; "the file is malicious" is not.
 
@@ -281,6 +284,7 @@ The values are placeholders that show the layout. They are not real data.
     {
       "tool": "virustotal", "status": "success", "call_id": "call-006",
       "data": {
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
         "found": true, "detections": 41, "engines_total": 72,
         "first_seen": "2024-05-02T10:11:12Z", "last_analysis_date": "2026-10-01T09:00:00Z",
         "threat_label": "trojan.example/placeholder",
@@ -321,14 +325,17 @@ There is deliberately **no verdict field** anywhere. `report_generator.py` rende
 | `src/malworn/contract.py` | Saood | `ToolSpec`, `ToolResult`, `success/failure/skipped`, `run_tool`, `validate`, `tool_catalogue` |
 | `src/malworn/static_analysis/` | Ahmed | `hashes`, `file_type`, `sections`, `imports`, `strings`, `extra_checks`, `version_info` |
 | `src/malworn/packing/` | Viha | `packing_indicators`, `packer_signatures` |
-| `src/malworn/detection/` | Hassan | `virustotal`, the aggregator and the report generator |
-| `src/malworn/agent/` | Saood | Tool list, agent loop, prompts, Ollama client |
+| `src/malworn/detection/` | Hassan | VirusTotal lookup, the aggregator and the report generator |
+| `src/malworn/agent/` | Saood | Tool list, agent loop, prompts, Ollama client, VirusTotal bridge and VM-side tool |
+| `src/malworn/app/` | Saood (page layout open to Ahmed) | Web app: upload, live progress, report, follow-up questions |
 
 ## Where things run
 
 The sample, the tools and the agent loop all run **inside the analysis VM**. The agent sends only text (tool descriptions, tool results, its own messages) to the model on the Windows host through Ollama's API on the host-only network. Reports leave the VM as `.json`/`.html`/`.pdf` files only, never samples.
 
 ## Changes
+
+**v0.3.2 (Nov 3):** `virustotal` is built: Hassan's lookup behind a hash-only bridge on Windows; `sha256` added to its keys. Warnings may use a verdict word when it is negated ("not evidence that a file is safe"). The agent's `file` object also carries `filename` and `size_bytes`, the names the report generator reads.
 
 **v0.3.1 (Oct 29):** catalogue updated with the tools merged since: `extra_checks` and `version_info` (Ahmed), and the real keys of `packing_indicators` plus `packer_signatures` (Viha), replacing the earlier proposal. A `failure`/`skipped` result without an `error` now gets its reported reason as the error.
 

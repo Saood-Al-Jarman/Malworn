@@ -24,7 +24,7 @@ TOOL_MODULES = [
     "malworn.static_analysis.strings",
     "malworn.static_analysis.extra_checks",
     "malworn.static_analysis.version_info",
-    "malworn.detection.virustotal",         # Hassan, not built yet
+    "malworn.agent.vt_tool",                # VirusTotal via the Windows bridge (lookup by Hassan)
 ]
 
 # Temporary SPECs for tools whose module doesn't define one yet. A SPEC in the

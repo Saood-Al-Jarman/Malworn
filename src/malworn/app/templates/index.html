@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel upload">
+  <h1>Analyse a file</h1>
+  <p class="muted">The file is saved under its SHA-256 and only read by the tools. Only its hash leaves this machine, for the VirusTotal lookup.</p>
+  <form method="post" action="{{ url_for('analyze') }}" enctype="multipart/form-data" class="form" id="upload-form">
+    <label class="drop" for="sample">
+      <input type="file" id="sample" name="sample" required>
+      <span class="drop-text" id="drop-text">Choose a file or drop it here (up to {{ max_mb }} MB)</span>
+    </label>
+    <label for="request" class="label">What do you want to know?</label>
+    <textarea id="request" name="request" rows="2" placeholder="{{ default_request }}"></textarea>
+    <div class="row">
+      <button type="submit" id="analyse-btn">Analyse</button>
+      <span class="muted small">Model: <code>{{ settings.model }}</code> at <code>{{ settings.ollama_url }}</code></span>
+    </div>
+  </form>
+</section>
+
+<section class="grid2">
+  <div class="panel">
+    <h2>Recent analyses</h2>
+    {% if recent %}
+    <ul class="runs">
+      {% for r in recent %}
+      <li>
+        <a href="{{ url_for('analysis', run_id=r.run_id) }}">{{ r.file_name }}</a>
+        <span class="pill {{ r.status }}">{{ r.status }}</span>
+        <span class="muted small mono">{{ r.sha256[:16] }}… · {{ r.created[:16].replace('T', ' ') }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No analyses yet. Upload a file to start.</p>
+    {% endif %}
+  </div>
+  <div class="panel">
+    <h2>Tools the agent can choose from</h2>
+    <ul class="toollist">
+      {% for t in tools %}
+      <li><code>{{ t.name }}</code><span class="muted small">{{ t.spec.description }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endblock %}

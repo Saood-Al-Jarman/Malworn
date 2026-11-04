@@ -192,9 +192,23 @@ def run_tool(spec, run, file_path, call_id=None):
 # ---------------------------------------------------------------------------
 # Checking results (use in every tool's tests)
 # ---------------------------------------------------------------------------
+_NEGATION_RE = re.compile(r"\b(not|never|no|cannot|without)\b|n't\b", re.IGNORECASE)
+
+
 def find_verdict_words(text):
-    """Return the verdict words used in ``text`` (empty list if none)."""
-    return [m.group(0) for m in _VERDICT_RE.finditer(text or "")]
+    """Return the verdict words used as a judgement in ``text`` (empty list if none).
+
+    A negated use is allowed, because it is a caution rather than a verdict:
+    "a missing record is not evidence that a file is safe". The negation must
+    come earlier in the same sentence.
+    """
+    text = text or ""
+    found = []
+    for m in _VERDICT_RE.finditer(text):
+        sentence_start = max(text.rfind(".", 0, m.start()), text.rfind(";", 0, m.start())) + 1
+        if not _NEGATION_RE.search(text[sentence_start:m.start()]):
+            found.append(m.group(0))
+    return found
 
 
 def validate(result, spec=None):

@@ -167,8 +167,8 @@ How to work:
 - Decide which tools the analyst's request needs. For a general analysis, start with hashes and
   file_type. If file_type says the file is a Windows PE executable, call packing_indicators next,
   because packing changes how every later result should be read. Then call sections, imports,
-  strings, extra_checks, version_info and packer_signatures. Call any other available tool that is
-  relevant to the request.
+  strings, extra_checks, version_info and packer_signatures. For any file, also call virustotal,
+  which looks up only the hash. Call any other available tool that is relevant to the request.
 - If the file is not a Windows PE, the PE tools will fail or be skipped. Do not call them again.
 - Call one tool at a time and read its result before deciding the next step. Do not call the same
   tool twice: its result will not change.
@@ -184,7 +184,9 @@ Rules for the answer:
 2. Give no verdict. Never call the file malicious, benign, safe or clean, and do not estimate how
    likely it is to be malware: the analyst decides. Indicators are evidence, not proof: use
    "suggests", "is consistent with" or "may", never "confirms" or "proves". A VirusTotal result is
-   VirusTotal's finding: report it as "N of M VirusTotal engines flag this hash".
+   VirusTotal's finding: report it as "N of M VirusTotal engines flag this hash". If VirusTotal
+   doesn't know the hash, say that this is not evidence either way. If its source is "mock" or
+   "cache", say that no live lookup was made.
 
 3. Packing is an indicator, not a fact and not a sign of malice: legitimate software is often
    packed. Report it as the tool's assessment, with its level and score, for example "the packing

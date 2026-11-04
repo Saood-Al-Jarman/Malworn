@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ meta.file_name }} · Malworn{% endblock %}
+{% block content %}
+<section class="panel head" id="analysis" data-run="{{ meta.run_id }}" data-status="{{ meta.status }}">
+  <div class="row between">
+    <h1 class="filename">{{ meta.file_name }}</h1>
+    <span class="pill {{ meta.status }}" id="status-pill">{{ meta.status }}</span>
+  </div>
+  <dl class="facts">
+    <dt>SHA-256</dt><dd class="mono">{{ meta.sha256 }}</dd>
+    <dt>Size</dt><dd>{{ "{:,}".format(meta.file_size) }} bytes</dd>
+    <dt>Request</dt><dd>{{ meta.request }}</dd>
+    {% if meta.seconds %}<dt>Time</dt><dd>{{ meta.seconds }} s</dd>{% endif %}
+  </dl>
+</section>
+
+{% if meta.status in ("queued", "running") %}
+<section class="panel live" id="live">
+  <h2>Working</h2>
+  <p class="muted" id="live-note">{% if meta.status == "queued" %}Waiting for the model (another analysis is running).{% else %}The model is choosing tools.{% endif %}</p>
+  <ol class="steps" id="steps"></ol>
+  <details open>
+    <summary>Model reasoning</summary>
+    <pre class="thinking" id="thinking"></pre>
+  </details>
+  <div class="answer-forming" id="answer-forming"></div>
+</section>
+{% elif meta.status == "error" %}
+<section class="panel error">
+  <h2>The analysis stopped</h2>
+  <p>{{ meta.error }}</p>
+  <p class="muted">Check that Ollama is running on Windows and reachable from the VM (<code>curl http://192.168.5.1:11434</code> in a terminal should print "Ollama is running"), then upload the file again.</p>
+</section>
+{% else %}
+<section class="grid-main">
+  <article class="panel explanation">
+    <h2>Explanation</h2>
+    <p class="muted small">Written by the model from the tool results. Tool names in brackets show where each fact came from. It is not a verdict.</p>
+    <div class="md">{{ explanation | markdown }}</div>
+  </article>
+
+  <aside class="panel tools-run">
+    <h2>Tools run</h2>
+    <table>
+      <tbody>
+      {% for r in report.tool_results %}
+        <tr>
+          <td><code>{{ r.tool }}</code></td>
+          <td><span class="pill {{ r.execution_status }}">{{ r.display_status }}</span></td>
+          <td class="num">{% if r.provenance.duration_ms is not none %}{{ r.provenance.duration_ms }} ms{% endif %}</td>
+        </tr>
+        {% if r.error %}<tr class="err"><td colspan="3">{{ r.error }}</td></tr>{% endif %}
+        {% if r.tool == "virustotal" and (r.data.source == "mock") %}<tr class="err"><td colspan="3">Mock VirusTotal result: no real lookup was made.</td></tr>{% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if report.execution_summary.not_selected_tools %}
+    <p class="muted small">Not chosen by the model: {{ report.execution_summary.not_selected_tools | join(", ") }}</p>
+    {% endif %}
+    <p class="small"><a href="{{ url_for('report_json', run_id=meta.run_id) }}">Download report.json</a></p>
+  </aside>
+</section>
+
+<section class="panel chat">
+  <h2>Ask a follow-up</h2>
+  <div id="chat-log">
+    {% for c in chat %}
+    <div class="q">{{ c.question }}</div>
+    <div class="a md">{{ c.answer | markdown }}{% if c.new_tools %}<p class="muted small">Ran: {{ c.new_tools | join(", ") }}</p>{% endif %}</div>
+    {% endfor %}
+  </div>
+  <form id="chat-form" class="row">
+    <label for="question" class="sr">Question</label>
+    <input type="text" id="question" name="question" autocomplete="off" placeholder="e.g. Which sections look packed, and why?" maxlength="2000">
+    <button type="submit" id="ask-btn">Ask</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Full report</h2>
+  <p class="muted small">Every fact the tools returned, from the report generator.</p>
+  <iframe class="report" id="report-frame" sandbox src="{{ url_for('report_html', run_id=meta.run_id) }}" title="Full report"></iframe>
+</section>
+{% endif %}
+{% endblock %}

@@ -72,10 +72,14 @@ def file_info(path, original_name=None):
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(65536), b""):
             digest.update(chunk)
+    name, size = original_name or path.name, path.stat().st_size
     return {
-        "file_name": original_name or path.name,
+        "file_name": name,
         "sha256": digest.hexdigest(),
-        "file_size": path.stat().st_size,
+        "file_size": size,
+        # the same two values under the names Hassan's report generator reads
+        "filename": name,
+        "size_bytes": size,
     }
 
 
@@ -161,36 +165,74 @@ def run_agent(
     path = Path(file_path)
     if not path.is_file():
         raise FileNotFoundError(f"No such file: {path}")
-
     if tools is None:
         tools, _ = load_tools()
+
+    info = file_info(path, original_name)
+    state = new_state([
+        {"role": "system", "content": AGENT_PROMPTS[prompt]},
+        {"role": "user", "content": first_message(info, request)},
+    ])
+    started = time.monotonic()
+    explanation = converse(state, path, tools, base_url=base_url, model=model, think=think,
+                           max_tool_calls=max_tool_calls, num_ctx=num_ctx, timeout=timeout, emit=emit)
+
+    agent_run = build_agent_run(info, tools, state, explanation)
+    report = aggregate_agent_run(agent_run)
+    report["agent_run_stats"] = {
+        "model": model,
+        "prompt": prompt,
+        "request": request,
+        "model_turns": len(state["turns"]),
+        "tool_calls": state["calls_made"],
+        "invalid_calls": state["invalid_calls"],
+        "repeat_calls": state["repeat_calls"],
+        "output_tokens": sum((t.get("output_tokens") or 0) for t in state["turns"]),
+        "seconds": round(time.monotonic() - started, 1),
+    }
+    return {"agent_run": agent_run, "report": report, "messages": state["messages"],
+            "explanation": explanation, "stats": report["agent_run_stats"]}
+
+
+def new_state(messages, results=None, selected=None):
+    """The conversation so far: messages, tool results (name -> ToolResult) and counters."""
+    return {"messages": messages, "results": dict(results or {}), "selected": list(selected or []),
+            "invalid_calls": [], "repeat_calls": [], "calls_made": 0, "turns": []}
+
+
+def build_agent_run(info, tools, state, explanation):
+    """The input to Hassan's aggregator."""
+    return {
+        "file": info,
+        "available_tools": [t.name for t in tools],
+        "selected_tools": list(state["selected"]),
+        "tool_results": [state["results"][name].to_dict() for name in state["selected"]],
+        "agent_explanation": explanation,
+    }
+
+
+def converse(state, path, tools, base_url=DEFAULT_OLLAMA_URL, model=DEFAULT_MODEL, think=True,
+             max_tool_calls=DEFAULT_MAX_TOOL_CALLS, num_ctx=DEFAULT_NUM_CTX,
+             timeout=DEFAULT_TIMEOUT, emit=None):
+    """Talk to the model until it stops calling tools; returns its final answer.
+
+    Tool calls are run on ``path`` and recorded in ``state``. A tool already in
+    state["results"] is not run again: the model gets the earlier result.
+    ``max_tool_calls`` applies to this call of converse() only.
+    """
+    emit = emit or (lambda kind, payload: None)
     by_name = {t.name: t for t in tools}
     definitions = [t.ollama_definition() for t in tools]
     options = dict(DEFAULT_OPTIONS, num_ctx=num_ctx)
-
-    info = file_info(path, original_name)
-    messages = [
-        {"role": "system", "content": AGENT_PROMPTS[prompt]},
-        {"role": "user", "content": first_message(info, request)},
-    ]
-
-    results = {}          # tool name -> ToolResult (first call only)
-    selected = []         # tool names in the order the model chose them
-    invalid_calls = []    # names the model asked for that don't exist
-    repeat_calls = []     # tools the model asked for twice
-    calls_made = 0
-    turns = []
-    started = time.monotonic()
-
-    def on_token(kind, text):
-        emit(kind, text)
+    messages, results = state["messages"], state["results"]
+    calls_here = 0
 
     while True:
-        offer_tools = calls_made < max_tool_calls
+        offer_tools = calls_here < max_tool_calls
         reply = chat(messages, base_url=base_url, model=model, options=options, think=think,
-                     timeout=timeout, on_token=on_token,
+                     timeout=timeout, on_token=emit,
                      tools=definitions if offer_tools else None)
-        turns.append(reply["stats"])
+        state["turns"].append(reply["stats"])
         tool_calls = reply["tool_calls"] if offer_tools else []
 
         assistant = {"role": "assistant", "content": reply["answer"]}
@@ -201,18 +243,18 @@ def run_agent(
         messages.append(assistant)
 
         if not tool_calls:
-            explanation = reply["answer"]
-            break
+            return reply["answer"]
 
         for call in tool_calls:
             name = ((call.get("function") or {}).get("name") or "").strip()
-            calls_made += 1
+            calls_here += 1
+            state["calls_made"] += 1
             if name not in by_name:
-                invalid_calls.append(name)
+                state["invalid_calls"].append(name)
                 emit("invalid_call", name)
                 content = json.dumps({"error": f"Unknown tool {name!r}. Available tools: {sorted(by_name)}"})
             elif name in results:
-                repeat_calls.append(name)
+                state["repeat_calls"].append(name)
                 emit("repeat_call", name)
                 content = ('{"note": "This tool was already called; its result does not change."} '
                            + result_for_model(results[name], by_name[name].model_keys))
@@ -221,53 +263,100 @@ def run_agent(
                 result = run_tool(by_name[name].spec, by_name[name].run, path,
                                   call_id=f"call-{len(results) + 1:03d}")
                 results[name] = result
-                selected.append(name)
+                state["selected"].append(name)
                 emit("tool_result", result)
                 content = result_for_model(result, by_name[name].model_keys)
             messages.append({"role": "tool", "tool_name": name or "unknown", "content": content})
 
-        if calls_made >= max_tool_calls:
+        if calls_here >= max_tool_calls:
             emit("limit", max_tool_calls)
             messages.append({"role": "user", "content": FINAL_NUDGE})
 
-    agent_run = {
-        "file": info,
-        "available_tools": [t.name for t in tools],
-        "selected_tools": selected,
-        "tool_results": [results[name].to_dict() for name in selected],
-        "agent_explanation": explanation,
-    }
-    report = aggregate_agent_run(agent_run)
-    report["agent_run_stats"] = {
-        "model": model,
-        "prompt": prompt,
-        "request": request,
-        "model_turns": len(turns),
-        "tool_calls": calls_made,
-        "invalid_calls": invalid_calls,
-        "repeat_calls": repeat_calls,
-        "output_tokens": sum((t.get("output_tokens") or 0) for t in turns),
-        "seconds": round(time.monotonic() - started, 1),
-    }
-    return {"agent_run": agent_run, "report": report, "messages": messages,
-            "explanation": explanation, "stats": report["agent_run_stats"]}
-
 
 def save_outputs(outcome, out_dir, html=True):
-    """Write report.json, report.html, explanation.md and transcript.json."""
+    """Write report.json, report.html, explanation.md, transcript.json and
+    agent_run.json (the raw tool results, used to answer follow-up questions)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     write_report_json(outcome["report"], out_dir / "report.json")
     (out_dir / "explanation.md").write_text(outcome["explanation"] or "", encoding="utf-8")
-    (out_dir / "transcript.json").write_text(
-        json.dumps({"stats": outcome["stats"], "messages": outcome["messages"]},
-                   indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_json(out_dir / "transcript.json", {"stats": outcome["stats"], "messages": outcome["messages"]})
+    _write_json(out_dir / "agent_run.json", outcome["agent_run"])
     if html:
         from malworn.detection.report_generator import render_html
         render_html(outcome["report"], out_dir / "report.html")
     return out_dir
+
+
+def _write_json(path, value):
+    Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Follow-up questions (FR: "follow-up chat", Team Tasks S7)
+# ---------------------------------------------------------------------------
+FOLLOWUP_TEMPLATE = (
+    "Follow-up question from the analyst: {question}\n\n"
+    "Answer it from the tool results above. Call a tool only if the answer needs information "
+    "that isn't there yet. All the rules still apply (no verdict, cite the tool behind every "
+    "fact, nothing invented). Answer briefly; you don't need the four-section format."
+)
+
+
+def ask_followup(run_dir, file_path, question, base_url=DEFAULT_OLLAMA_URL, model=DEFAULT_MODEL,
+                 think=True, max_tool_calls=6, num_ctx=DEFAULT_NUM_CTX, timeout=DEFAULT_TIMEOUT,
+                 tools=None, on_event=None, html=True):
+    """Answer a follow-up question about a saved analysis.
+
+    Continues the saved conversation, so the model sees all earlier tool
+    results and its own explanation. It may call tools it didn't call before;
+    any new results are added to the report. The exchange is appended to
+    chat.json. Returns {"answer", "new_tools", "seconds"}.
+    """
+    run_dir = Path(run_dir)
+    question = (question or "").strip()
+    if not question:
+        raise ValueError("The question is empty")
+    if tools is None:
+        tools, _ = load_tools()
+    from malworn.contract import ToolResult
+
+    transcript = json.loads((run_dir / "transcript.json").read_text(encoding="utf-8"))
+    agent_run = json.loads((run_dir / "agent_run.json").read_text(encoding="utf-8"))
+    results = {r["tool"]: ToolResult.from_dict(r) for r in agent_run["tool_results"]}
+    state = new_state(transcript["messages"], results, agent_run["selected_tools"])
+    state["messages"].append({"role": "user", "content": FOLLOWUP_TEMPLATE.format(question=question)})
+    before = set(results)
+
+    started = time.monotonic()
+    answer = converse(state, Path(file_path), tools, base_url=base_url, model=model, think=think,
+                      max_tool_calls=max_tool_calls, num_ctx=num_ctx, timeout=timeout, emit=on_event)
+    seconds = round(time.monotonic() - started, 1)
+    new_tools = [name for name in state["selected"] if name not in before]
+
+    transcript["messages"] = state["messages"]
+    _write_json(run_dir / "transcript.json", transcript)
+    if new_tools:
+        updated = build_agent_run(agent_run["file"], tools, state, agent_run.get("agent_explanation"))
+        report = aggregate_agent_run(updated)
+        old = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+        if "agent_run_stats" in old:
+            report["agent_run_stats"] = old["agent_run_stats"]
+        write_report_json(report, run_dir / "report.json")
+        _write_json(run_dir / "agent_run.json", updated)
+        if html:
+            from malworn.detection.report_generator import render_html
+            render_html(report, run_dir / "report.html")
+
+    chat_file = run_dir / "chat.json"
+    try:
+        history = json.loads(chat_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        history = []
+    history.append({"question": question, "answer": answer, "new_tools": new_tools,
+                    "seconds": seconds, "asked_at": datetime.now(timezone.utc).isoformat()})
+    _write_json(chat_file, history)
+    return {"answer": answer, "new_tools": new_tools, "seconds": seconds}
 
 
 # ---------------------------------------------------------------------------

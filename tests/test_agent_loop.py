@@ -15,7 +15,7 @@ from malworn.contract import ToolSpec
 from tests.conftest import DONE, FakeOllama
 
 
-ALL_TOOLS = ["hashes", "file_type", "packing_indicators", "packer_signatures", "sections", "imports", "strings", "extra_checks", "version_info"]
+ALL_TOOLS = ["hashes", "file_type", "packing_indicators", "packer_signatures", "sections", "imports", "strings", "extra_checks", "version_info", "virustotal"]
 
 
 def call(*names):
@@ -178,7 +178,7 @@ def test_file_name_is_quoted_as_data():
 def test_registry_loads_every_merged_tool_and_skips_unbuilt_ones():
     tools, skipped = agent_tools.load_tools()
     assert [t.name for t in tools] == ALL_TOOLS
-    assert skipped == [("malworn.detection.virustotal", "not built yet")]
+    assert skipped == []
 
 
 def test_a_spec_in_the_tool_module_wins_over_the_fallback(monkeypatch):
@@ -208,7 +208,7 @@ def test_main_writes_the_report_files(fake_ollama, sample, tmp_path, capsys):
     code = loop.main([str(sample), "--url", fake_ollama, "--out", str(out)])
     assert code == 0
 
-    assert {p.name for p in out.iterdir()} == {"report.json", "report.html", "explanation.md", "transcript.json"}
+    assert {p.name for p in out.iterdir()} == {"report.json", "report.html", "explanation.md", "transcript.json", "agent_run.json"}
     report = json.loads((out / "report.json").read_text())
     assert report["execution_summary"]["selected_tools"] == ["hashes", "file_type"]
     assert "A small file" in (out / "explanation.md").read_text()
@@ -280,3 +280,58 @@ def test_pe_tools_on_a_non_pe_file_fail_or_skip_with_a_reason(fake_ollama, sampl
     assert by_tool["version_info"]["status"] == "failure"
     assert by_tool["packing_indicators"]["status"] == "skipped"
     assert all(r["error"] for r in by_tool.values())
+
+
+# ---------------------------------------------------------------------------
+# Follow-up questions
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def saved_run(fake_ollama, sample, tmp_path):
+    FakeOllama.script = [call("hashes", "file_type"), answer("## Summary\nFirst answer [hashes].")]
+    outcome = run(sample, fake_ollama)
+    out = loop.save_outputs(outcome, tmp_path / "run")
+    FakeOllama.received.clear()
+    return out
+
+
+def test_followup_continues_the_conversation(fake_ollama, sample, saved_run):
+    FakeOllama.script = [answer("The SHA-256 is in the hashes result [hashes].")]
+    result = loop.ask_followup(saved_run, sample, "What is the SHA-256?", base_url=fake_ollama)
+
+    assert result["answer"] == "The SHA-256 is in the hashes result [hashes]."
+    assert result["new_tools"] == []
+    sent = FakeOllama.received[0]["messages"]
+    assert [m["role"] for m in sent[:2]] == ["system", "user"]
+    assert any(m["role"] == "tool" and m["tool_name"] == "hashes" for m in sent)  # earlier results
+    assert "What is the SHA-256?" in sent[-1]["content"]
+
+    history = json.loads((saved_run / "chat.json").read_text())
+    assert history[0]["question"] == "What is the SHA-256?"
+    transcript = json.loads((saved_run / "transcript.json").read_text())
+    assert transcript["messages"][-1]["content"] == result["answer"]
+
+
+def test_followup_can_run_a_new_tool_and_updates_the_report(fake_ollama, sample, saved_run):
+    FakeOllama.script = [call("strings"), answer("It contains a URL [strings].")]
+    result = loop.ask_followup(saved_run, sample, "Any URLs?", base_url=fake_ollama)
+
+    assert result["new_tools"] == ["strings"]
+    report = json.loads((saved_run / "report.json").read_text())
+    assert report["execution_summary"]["selected_tools"] == ["hashes", "file_type", "strings"]
+    assert report["agent_commentary"]["text"].startswith("## Summary")  # original explanation kept
+    assert "agent_run_stats" in report
+
+
+def test_followup_does_not_rerun_old_tools(fake_ollama, sample, saved_run, monkeypatch):
+    ran = []
+    monkeypatch.setattr("malworn.agent.loop.run_tool", lambda *a, **k: ran.append(a) or None)
+    FakeOllama.script = [call("hashes"), answer("Same hash [hashes].")]
+    result = loop.ask_followup(saved_run, sample, "Again?", base_url=fake_ollama)
+    assert ran == []
+    assert result["new_tools"] == []
+    assert "already called" in FakeOllama.received[1]["messages"][-1]["content"]
+
+
+def test_followup_rejects_an_empty_question(saved_run, sample):
+    with pytest.raises(ValueError):
+        loop.ask_followup(saved_run, sample, "   ")
