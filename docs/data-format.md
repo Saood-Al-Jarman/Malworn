@@ -1,6 +1,6 @@
 # Malworn Data Format
 
-**Version:** 0.3 (draft, open for team review)
+**Version:** 0.3.2 (draft, open for team review)
 **Owner:** Saood
 **Code:** [`src/malworn/contract.py`](../src/malworn/contract.py) (what tools return) and Hassan's [`src/malworn/detection/malworn_aggregator.py`](../src/malworn/detection/malworn_aggregator.py) (the report). `tests/test_contract.py` checks this document against both, so if the doc and the code disagree, the tests fail.
 
@@ -142,28 +142,77 @@ Planned: `imphash`.
 
 **Open issue:** a small benign 100 KB executable already gives 843 strings, so a real sample can give tens of thousands. That is too much to send to the model and is all untrusted text (rule 7). Proposed: cap the list (e.g. first 500, with `truncated: true`), and add grouped keys the agent can use directly: `urls`, `ips`, `file_paths`, `registry_keys`.
 
-### `packing_indicators`: Viha, FR5, not built yet (proposal)
+### `extra_checks`: Ahmed, FR4, built
 
 | Key | Type | Meaning |
 |---|---|---|
-| `indicators` | list | One object per indicator: `name`, `value`, `threshold`, `triggered` (bool), `detail` |
-| `triggered_count` | int | How many indicators fired |
-| `signatures` | list | Packer signature matches, each `{"source": "diec", "match": "UPX(3.96)"}`; `[]` if none |
+| `has_overlay` | bool | Whether there is data after the last section |
+| `overlay_size` | int | Size of that data in bytes (0 if none) |
+| `imphash` | string or null | Hash of the import list; samples built from the same code often share it |
 
-Suggested indicators to start with (from the literature review): section entropy, raw vs virtual size, entry point outside the first code section, number of imports, unusual section names. There is intentionally **no `is_packed`**: the indicators are the evidence, and the analyst decides.
-
-### `virustotal`: Hassan, FR3, not built yet (proposal)
+### `version_info`: Ahmed, FR4, built
 
 | Key | Type | Meaning |
 |---|---|---|
+| `version_info` | object | Version-resource fields that are present: `CompanyName`, `FileDescription`, `FileVersion`, `InternalName`, `OriginalFilename`, `ProductName`, `ProductVersion`, `LegalCopyright` |
+| `resource_count` | int | Number of embedded resources |
+| `has_signature` | bool | A signature block is present. It is **not** verified. |
+
+### `packing_indicators`: Viha, FR5, built
+
+Detect It Easy runs first (once per file, cached). On a file that isn't a PE, the tool returns `"skipped"` with the reason.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `summary` | string | One line: final assessment, level, score, sections that look packed, packer |
+| `final_assessment` | object | `determination`, `confidence`, `label` (e.g. "PACKED (high confidence)"), `basis`, `caveat` |
+| `packing_level` | string | `none_detected`, `possible` (score ≥ 3) or `likely` (score ≥ 6) |
+| `needs_unpacking` | bool | True when the level is `possible` or `likely`: the analyst should unpack and re-upload |
+| `score` | int | Total points from `evidence_for` |
+| `static_evidence_reliability` | string | `normal` or `reduced`; reduced means imports and strings mostly come from the unpacking stub |
+| `packer_classification` | object | `status` (`known_packer`, `known_packer_modified_variant`, `known_packer_weak`, `unknown_packer`, `none_detected`), `packer`, `why` |
+| `per_section` | list | Per section: `name`, `raw_size`, `virtual_size`, `entropy`, `permissions`, `packing_level`, `packing_points`, `packing_evidence_ids` |
+| `evidence_for` | list | Every indicator that adds points: `id`, `value`, `threshold`, `points`, `severity`, `location`, `why`, `source` |
+| `evidence_weak` | list | Low-severity observations (0 points) |
+| `counter_evidence` | list | What was checked and looked normal |
+| `observations` | list | Information-only facts |
+| `high_entropy_regions` | list | Byte ranges with high entropy, mapped onto sections or the overlay |
+| `checks_run` | object | Which optional checks ran (Detect It Easy, instruction structure, YARA) and why not |
+| `thresholds_used` | object | Every threshold, so results can be reproduced (NFR9) |
+| `message_for_analyst` | string | All of the above as a readable report |
+
+The agent sends the model a shorter view of this result (see `MODEL_VIEWS` in `agent/tools.py`); the report keeps all of it.
+
+**Open question:** `final_assessment` gives a packed / not-packed headline with a confidence tier. Rule 8 says packing is shown as indicators, never as a decision (FR5). The team needs to agree whether the headline stays; the agent prompt tells the model to report it as the tool's assessment, with the evidence.
+
+### `packer_signatures`: Viha, FR5, built
+
+| Key | Type | Meaning |
+|---|---|---|
+| `detect_it_easy` | object | Whether Detect It Easy ran, and the packers, compilers and file type it found |
+| `pe_checks` | string | `"run"`, or why the PE checks could not run (e.g. not a PE) |
+| `section_name_matches` | list | Sections whose names match a known packer (e.g. `UPX0`) |
+| `bundled_signature_matches` | list | Byte patterns matched at the entry point or elsewhere, with source and whether verified |
+| `suspected_packers` | list | Packer names with the evidence that supports each |
+| `local_yara` | object | Whether local YARA rules were used, and any matches |
+| `final_assessment` | object or null | Same as in `packing_indicators`, when the PE checks ran |
+| `summary` | string | One line for the analyst |
+
+### `virustotal`: Hassan (lookup) and Saood (bridge), FR3, built
+
+The VM has no internet, so the agent's `virustotal` tool (`agent/vt_tool.py`) hashes the sample in the VM and sends only the SHA-256 to a bridge on the Windows host (`agent/vt_bridge.py`), which runs Hassan's lookup (`detection/virustotal_tool.py`) with the API key that lives on Windows. See `docs/demo.md`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `sha256` | string | The hash that was looked up |
 | `found` | bool or null | Whether VirusTotal knows this SHA-256 (`null` if the lookup failed) |
-| `detections` | int or null | Engines that flagged the file in VirusTotal's last analysis |
+| `detections` | int or null | Engines that flagged the file in VirusTotal's last analysis (malicious + suspicious) |
 | `engines_total` | int or null | Engines in that analysis |
 | `first_seen` | string or null | First submission date on VirusTotal, ISO 8601 |
 | `last_analysis_date` | string or null | ISO 8601 |
 | `threat_label` | string or null | VirusTotal's popular threat label (VirusTotal's opinion, reported as such) |
 | `permalink` | string or null | Link to the VirusTotal page for the hash |
-| `source` | string | `"live"`, `"cache"` or `"mock"` (mock mode lets us work without an API key) |
+| `source` | string | `"api"` (live), `"cache"`, `"mock"` or `"none"` |
 
 These match the field names in Hassan's report generator. They are facts *about VirusTotal's results*, credited to VirusTotal: "41 of 72 VirusTotal engines flag this hash" is a fact; "the file is malicious" is not.
 
@@ -190,8 +239,8 @@ The values are placeholders that show the layout. They are not real data.
     "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "file_size": 245760
   },
-  "available_tools": ["hashes", "file_type", "sections", "imports", "strings", "packing_indicators", "virustotal"],
-  "selected_tools": ["hashes", "file_type", "sections", "imports", "packing_indicators", "virustotal"],
+  "available_tools": ["hashes", "file_type", "packing_indicators", "packer_signatures", "sections", "imports", "strings", "extra_checks", "version_info", "virustotal"],
+  "selected_tools": ["hashes", "file_type", "sections", "imports", "extra_checks", "virustotal"],
   "tool_results": [
     {
       "tool": "hashes", "status": "success", "call_id": "call-001",
@@ -228,22 +277,14 @@ The values are placeholders that show the layout. They are not real data.
       "error": null, "tool_version": "0.1", "duration_ms": 11
     },
     {
-      "tool": "packing_indicators", "status": "success", "call_id": "call-005",
-      "data": {
-        "indicators": [
-          {"name": "max_section_entropy", "value": 7.91, "threshold": 7.2, "triggered": true, "detail": "Highest section entropy (UPX1)"},
-          {"name": "raw_vs_virtual_size", "value": 0, "threshold": null, "triggered": true, "detail": "UPX0 has raw size 0 but virtual size 155648"},
-          {"name": "import_count", "value": 5, "threshold": 10, "triggered": true, "detail": "Fewer imported functions than the threshold"}
-        ],
-        "triggered_count": 3,
-        "signatures": [{"source": "diec", "match": "UPX(3.96)"}]
-      },
-      "warnings": ["3 packing indicators triggered", "Detect It Easy matched UPX(3.96)"],
-      "error": null, "tool_version": "0.1", "duration_ms": 120
+      "tool": "extra_checks", "status": "success", "call_id": "call-005",
+      "data": {"has_overlay": false, "overlay_size": 0, "imphash": "00000000000000000000000000000000"},
+      "warnings": [], "error": null, "tool_version": "0.1", "duration_ms": 6
     },
     {
       "tool": "virustotal", "status": "success", "call_id": "call-006",
       "data": {
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
         "found": true, "detections": 41, "engines_total": 72,
         "first_seen": "2024-05-02T10:11:12Z", "last_analysis_date": "2026-10-01T09:00:00Z",
         "threat_label": "trojan.example/placeholder",
@@ -258,7 +299,7 @@ The values are placeholders that show the layout. They are not real data.
 }
 ```
 
-Here the model chose not to call `strings`; the aggregator lists it under `not_selected_tools`.
+This shortened example leaves out the packing tools, whose results are long (see the catalogue above); tools the model didn't call are listed by the aggregator under `not_selected_tools`.
 
 ## The report (Hassan's aggregator)
 
@@ -282,16 +323,21 @@ There is deliberately **no verdict field** anywhere. `report_generator.py` rende
 | Path | Owner | Contents |
 |---|---|---|
 | `src/malworn/contract.py` | Saood | `ToolSpec`, `ToolResult`, `success/failure/skipped`, `run_tool`, `validate`, `tool_catalogue` |
-| `src/malworn/static_analysis/` | Ahmed | `hashes`, `file_type`, `sections`, `imports`, `strings` |
-| `src/malworn/packing/` | Viha | `packing_indicators` |
-| `src/malworn/detection/` | Hassan | `virustotal`, the aggregator and the report generator |
-| `src/malworn/agent/` | Saood | Tool list, agent loop, prompts, Ollama client |
+| `src/malworn/static_analysis/` | Ahmed | `hashes`, `file_type`, `sections`, `imports`, `strings`, `extra_checks`, `version_info` |
+| `src/malworn/packing/` | Viha | `packing_indicators`, `packer_signatures` |
+| `src/malworn/detection/` | Hassan | VirusTotal lookup, the aggregator and the report generator |
+| `src/malworn/agent/` | Saood | Tool list, agent loop, prompts, Ollama client, VirusTotal bridge and VM-side tool |
+| `src/malworn/app/` | Saood (page layout open to Ahmed) | Web app: upload, live progress, report, follow-up questions |
 
 ## Where things run
 
 The sample, the tools and the agent loop all run **inside the analysis VM**. The agent sends only text (tool descriptions, tool results, its own messages) to the model on the Windows host through Ollama's API on the host-only network. Reports leave the VM as `.json`/`.html`/`.pdf` files only, never samples.
 
 ## Changes
+
+**v0.3.2 (Nov 3):** `virustotal` is built: Hassan's lookup behind a hash-only bridge on Windows; `sha256` added to its keys. Warnings may use a verdict word when it is negated ("not evidence that a file is safe"). The agent's `file` object also carries `filename` and `size_bytes`, the names the report generator reads.
+
+**v0.3.1 (Oct 29):** catalogue updated with the tools merged since: `extra_checks` and `version_info` (Ahmed), and the real keys of `packing_indicators` plus `packer_signatures` (Viha), replacing the earlier proposal. A `failure`/`skipped` result without an `error` now gets its reported reason as the error.
 
 **v0.3 (Oct 26):** aligned with the code that was merged over the weekend.
 
@@ -308,6 +354,6 @@ The sample, the tools and the agent loop all run **inside the analysis VM**. The
 ## Open questions for the team
 
 - **Ahmed:** can you add a `SPEC` and `"warnings": []` to your five tools (about 5 lines each, example above)? And what do you think of capping `strings` and grouping URLs, IPs, paths and registry keys?
-- **Viha:** are the starting indicators and the `indicators` shape right for your approach? Which thresholds do you want to start with?
+- **Viha:** should `final_assessment` keep its packed / not-packed headline (see the open question under `packing_indicators`)? And can you check that `diec` runs in the VM?
 - **Hassan:** are the `virustotal` keys right? Can you upload the missing `examples/mock_agent_run.json` (one aggregator test fails without it), and could the aggregator's `SCHEMA_VERSION` become `"0.3"` once this is agreed?
 - **All:** is anything missing that the agent would need to explain a result to an analyst?

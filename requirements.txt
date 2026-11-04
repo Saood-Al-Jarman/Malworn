@@ -12,4 +12,9 @@ scikit-learn
 # Testing
 pytest
 
-# LLM / agent / app libraries: add here once the team decides on them
+# Web app (runs in the VM on 127.0.0.1:8080)
+flask
+
+# The agent and the VirusTotal bridge use only the standard library.
+# Optional for packing: capstone (instruction-structure check), yara-python (local rules).
+# Optional for PDF reports: reportlab

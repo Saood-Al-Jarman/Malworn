@@ -54,6 +54,17 @@ pip install -r requirements.txt
 cp .env.example .env   # then fill in your own values
 ```
 
+## Running Malworn
+
+See [docs/demo.md](docs/demo.md) for the full setup. In short, inside the analysis VM:
+
+```bash
+PYTHONPATH=src python3 -m malworn.app.check    # is everything reachable?
+PYTHONPATH=src python3 -m malworn.app.web      # then open http://127.0.0.1:8080 in the VM
+```
+
+On Windows, Ollama and the hash-only VirusTotal bridge (`python -m malworn.agent.vt_bridge`) run next to each other. How the parts fit: [docs/data-format.md](docs/data-format.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: never push to `main` directly — branch, open a pull request, get one approval, merge.

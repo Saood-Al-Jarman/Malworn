@@ -24,6 +24,10 @@ models/
 # === Secrets ===
 .env
 
+# === Malworn output (keep results out of git) ===
+runs/
+malworn-data/
+
 # === Python ===
 __pycache__/
 *.pyc
