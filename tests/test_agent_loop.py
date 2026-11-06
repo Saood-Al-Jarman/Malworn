@@ -42,6 +42,7 @@ def sample(tmp_path):
 def run(sample, url, **kwargs):
     """Loop mechanics tests turn the answer check off; it has its own tests below."""
     kwargs.setdefault("check", False)
+    kwargs.setdefault("core", False)   # the core triage has its own tests below
     return loop.run_agent(sample, base_url=url, **kwargs)
 
 
@@ -207,7 +208,7 @@ def test_a_new_tool_is_picked_up_without_changing_the_agent(monkeypatch):
 def test_main_writes_the_report_files(fake_ollama, sample, tmp_path, capsys):
     FakeOllama.script = [call("hashes", "file_type"), answer("## Summary\nA small file [hashes].")]
     out = tmp_path / "out"
-    code = loop.main([str(sample), "--url", fake_ollama, "--out", str(out)])
+    code = loop.main([str(sample), "--url", fake_ollama, "--out", str(out), "--no-core"])
     assert code == 0
 
     assert {p.name for p in out.iterdir()} == {"report.json", "report.html", "explanation.md", "transcript.json", "agent_run.json"}
@@ -420,3 +421,25 @@ def test_cutoff_recovery_is_limited(fake_ollama, sample):
     outcome = run(sample, fake_ollama)
     assert len(FakeOllama.received) == 1 + loop.MAX_CUTOFF_RECOVERIES
     assert outcome["explanation"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Core triage run in code
+# ---------------------------------------------------------------------------
+def test_core_tools_run_before_the_model_starts(fake_ollama, sample):
+    FakeOllama.script = [call("strings"), answer("A URL [strings].")]
+    outcome = run(sample, fake_ollama, core=True)
+
+    assert outcome["agent_run"]["selected_tools"] == list(loop.CORE_TOOLS) + ["strings"]
+    first = FakeOllama.received[0]["messages"]
+    assert "already been run" in first[1]["content"]
+    assert [m["role"] for m in first[1:]] == ["user", "assistant"] + ["tool"] * len(loop.CORE_TOOLS)
+    assert [m["tool_name"] for m in first[3:]] == list(loop.CORE_TOOLS)
+    assert outcome["stats"]["core_tools"] == list(loop.CORE_TOOLS)
+
+
+def test_core_tools_are_not_rerun_when_the_model_calls_them(fake_ollama, sample):
+    FakeOllama.script = [call("hashes"), answer("done")]
+    outcome = run(sample, fake_ollama, core=True)
+    assert outcome["stats"]["repeat_calls"] == ["hashes"]
+    assert outcome["agent_run"]["selected_tools"].count("hashes") == 1

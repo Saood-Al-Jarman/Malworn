@@ -59,6 +59,15 @@ MAX_TURN_TOKENS = 4096
 # advice for quantized models (Ollama's qwen3:8b is 4-bit) that repeat themselves.
 QWEN_SAMPLING = {"top_p": 0.95, "top_k": 20, "presence_penalty": 1.5}
 MAX_CUTOFF_RECOVERIES = 2
+
+# Core triage: run by the code, every time, before the model starts. These are
+# the checks every first-level analysis needs; the model then chooses which of
+# the other tools to call. In the Nov 6 comparison the model sometimes skipped
+# them; running them in code guarantees the evidence and saves model turns.
+CORE_TOOLS = ("hashes", "file_type", "packing_indicators", "virustotal")
+CORE_NOTE = ("The core triage tools ({names}) have already been run for you; their results are "
+             "below. Do not call them again. Decide which of the other tools this request needs, "
+             "call them, then answer.")
 CUTOFF_NUDGE = ("Your reasoning was cut off before you answered. Do not reason any further. "
                 "Using the tool results above, call the next tool you need or write your answer now.")
 
@@ -166,6 +175,7 @@ def run_agent(
     on_event=None,
     check=True,
     options=None,
+    core=True,
 ):
     """Run the agent on one file. Returns a dict with the agent run (the input
     to Hassan's aggregator), the aggregated report, the transcript and stats.
@@ -174,6 +184,7 @@ def run_agent(
     "thinking", "answer", "tool_call", "tool_result", "invalid_call",
     "repeat_call", "limit", "check".
 
+    ``core`` runs CORE_TOOLS in code before the model starts (see above).
     ``check`` runs agent.verify on the answer and gives the model one
     correction turn if it cites tools that didn't run or uses verdict
     language. ``options`` overrides model options (e.g. {"seed": 3}).
@@ -186,11 +197,17 @@ def run_agent(
         tools, _ = load_tools()
 
     info = file_info(path, original_name)
+    core_names = [name for name in CORE_TOOLS if name in {t.name for t in tools}] if core else []
+    opening = first_message(info, request)
+    if core_names:
+        opening += "\n\n" + CORE_NOTE.format(names=", ".join(core_names))
     state = new_state([
         {"role": "system", "content": AGENT_PROMPTS[prompt]},
-        {"role": "user", "content": first_message(info, request)},
+        {"role": "user", "content": opening},
     ])
     started = time.monotonic()
+    if core_names:
+        run_core_tools(state, path, tools, core_names, emit)
     explanation = converse_checked(state, path, tools, check=check, base_url=base_url, model=model,
                                    think=think, max_tool_calls=max_tool_calls, num_ctx=num_ctx,
                                    timeout=timeout, emit=emit, options=options)
@@ -206,6 +223,7 @@ def run_agent(
         "invalid_calls": state["invalid_calls"],
         "repeat_calls": state["repeat_calls"],
         "checked": check,
+        "core_tools": core_names,
         "checks": state["checks"],
         "corrections": sum(1 for c in state["checks"] if c["corrected"]),
         "cutoffs": state.get("cutoffs", 0),
@@ -214,6 +232,23 @@ def run_agent(
     }
     return {"agent_run": agent_run, "report": report, "messages": state["messages"],
             "explanation": explanation, "stats": report["agent_run_stats"]}
+
+
+def run_core_tools(state, path, tools, names, emit):
+    """Run the core triage tools in code and add them to the conversation as if
+    the model had called them, so it sees the results in the usual format."""
+    by_name = {t.name: t for t in tools}
+    state["messages"].append({"role": "assistant", "content": "",
+                              "tool_calls": [{"function": {"name": n, "arguments": {}}} for n in names]})
+    for name in names:
+        emit("tool_call", name)
+        result = run_tool(by_name[name].spec, by_name[name].run, path,
+                          call_id=f"call-{len(state['results']) + 1:03d}")
+        state["results"][name] = result
+        state["selected"].append(name)
+        emit("tool_result", result)
+        state["messages"].append({"role": "tool", "tool_name": name,
+                                  "content": result_for_model(result, by_name[name].model_keys)})
 
 
 def new_state(messages, results=None, selected=None):
@@ -442,6 +477,8 @@ def parse_args(argv=None):
     parser.add_argument("--no-html", action="store_true", help="don't write report.html")
     parser.add_argument("--hide-thinking", action="store_true", help="don't print the model's reasoning")
     parser.add_argument("--no-think", action="store_true", help="turn off Qwen's thinking mode")
+    parser.add_argument("--no-core", action="store_true",
+                        help="let the model choose every tool (don't run the core triage tools first)")
     parser.add_argument("--no-check", action="store_true",
                         help="don't check the answer's citations and verdict language (agent.verify)")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
@@ -495,7 +532,7 @@ def main(argv=None):
             path, request=args.request, original_name=args.name, base_url=args.url,
             model=args.model, prompt=args.prompt, think=not args.no_think,
             max_tool_calls=args.max_tool_calls, num_ctx=args.num_ctx, timeout=args.timeout,
-            tools=tools, on_event=on_event, check=not args.no_check,
+            tools=tools, on_event=on_event, check=not args.no_check, core=not args.no_core,
         )
     except OllamaError as exc:
         err(f"\nerror: {exc}")

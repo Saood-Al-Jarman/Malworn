@@ -24,8 +24,9 @@ Usage (inside the VM, from the repo root; each run takes about a minute):
     PYTHONPATH=src python3 -m malworn.agent.evaluate_agent ~/demo-files/launcher.exe ~/demo-files/launcher_upx.exe
     PYTHONPATH=src python3 -m malworn.agent.evaluate_agent FILES... --configs a2 a3 --runs 3
 
-Configurations: a name is a prompt version; "+check" turns the answer check on.
-Default: "a2" (the Nov 4 baseline, no check) and "a3+check" (the fix).
+Configurations: a name is a prompt version; "+check" turns the answer check on;
+"+core" runs the core triage tools in code first.
+Default: "a2" (Nov 4 baseline), "a3+check", "a3+check+core".
 
 Output: runs/agent_eval_<time>/summary.md, summary.json and one folder per run.
 """
@@ -40,20 +41,21 @@ from pathlib import Path
 
 from malworn.agent import verify
 from malworn.agent.client import DEFAULT_MODEL, DEFAULT_OLLAMA_URL, OllamaError
-from malworn.agent.loop import run_agent, save_outputs
+from malworn.agent.loop import CORE_TOOLS, run_agent, save_outputs
 from malworn.agent.prompts import AGENT_PROMPTS, DEFAULT_AGENT_REQUEST
 from malworn.agent.tools import load_tools
 
-DEFAULT_CONFIGS = ["a2", "a3+check"]
+DEFAULT_CONFIGS = ["a2", "a3+check", "a3+check+core"]
 NON_PE_EXPECTED = ("hashes", "file_type", "strings", "virustotal")
 
 
 def parse_config(name):
-    prompt, _, flag = name.partition("+")
-    if prompt not in AGENT_PROMPTS or flag not in ("", "check"):
+    """'a3+check+core' -> ('a3', check=True, core=True)."""
+    prompt, *flags = name.split("+")
+    if prompt not in AGENT_PROMPTS or any(f not in ("check", "core") for f in flags):
         raise ValueError(f"Unknown configuration {name!r}: use a prompt ({', '.join(AGENT_PROMPTS)}), "
-                         "optionally followed by +check")
-    return prompt, flag == "check"
+                         "optionally followed by +check and/or +core")
+    return prompt, "check" in flags, "core" in flags
 
 
 def is_pe(path):
@@ -74,10 +76,15 @@ def score_run(outcome, expected, available):
     checks = outcome["stats"].get("checks") or []
     first = checks[0]["problems"] if checks else final
     hit = [t for t in expected if t in selected]
+    # The tools the MODEL had to choose: everything expected except the core
+    # triage. Measured the same way for every configuration, so they compare.
+    choice = [t for t in expected if t not in CORE_TOOLS]
+    chosen = [t for t in choice if t in selected]
     return {
         "selected": selected,
         "expected": expected,
         "tool_recall": round(len(hit) / len(expected), 3) if expected else 1.0,
+        "choice_recall": round(len(chosen) / len(choice), 3) if choice else 1.0,
         "missed_tools": [t for t in expected if t not in selected],
         "extra_tools": [t for t in selected if t not in expected],
         "cited_not_run_first": first["cited_not_run"],
@@ -132,6 +139,7 @@ def summarize(rows, configs):
         out[config] = {
             "runs": n,
             "mean_tool_recall": round(sum(r["tool_recall"] for r in mine) / n, 3),
+            "mean_choice_recall": round(sum(r["choice_recall"] for r in mine) / n, 3),
             "runs_with_all_expected_tools": sum(1 for r in mine if not r["missed_tools"]),
             "runs_citing_unrun_tools_first": sum(1 for r in mine if r["cited_not_run_first"]),
             "runs_citing_unrun_tools_final": sum(1 for r in mine if r["cited_not_run_final"]),
@@ -160,7 +168,8 @@ def write_summary(path, summary, rows, configs, files, model):
         cells = [fmt(summary[c], key) if summary[c].get("runs") else "n/a" for c in configs]
         lines.append(f"| {label} | " + " | ".join(cells) + " |")
 
-    row("Mean tool recall (O3 target 0.9)", "mean_tool_recall", lambda s, k: f"{s[k]:.2f}")
+    row("Mean tool coverage, all expected tools", "mean_tool_recall", lambda s, k: f"{s[k]:.2f}")
+    row("Mean model-choice recall, non-core tools (O3 target 0.9)", "mean_choice_recall", lambda s, k: f"{s[k]:.2f}")
     row("Runs that called every expected tool", "runs_with_all_expected_tools")
     row("Runs citing tools that never ran (before any correction)", "runs_citing_unrun_tools_first")
     row("Runs citing tools that never ran (final answer)", "runs_citing_unrun_tools_final")
@@ -210,6 +219,7 @@ def main(argv=None):
               file=sys.stderr)
         return 2
 
+    args.files = list(dict.fromkeys(str(Path(f).resolve()) for f in args.files))  # drop duplicates
     tools, _ = load_tools()
     available = [t.name for t in tools]
     out_dir = Path(args.out or f"runs/agent_eval_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}")
@@ -221,14 +231,15 @@ def main(argv=None):
     rows, done = [], 0
     for file in args.files:
         expected = expected_tools(file, available)
-        for config, (prompt, check) in configs.items():
+        for config, (prompt, check, core) in configs.items():
             for seed in range(1, args.runs + 1):
                 done += 1
                 base = {"file": Path(file).name, "config": config, "seed": seed}
                 print(f"[{done}/{total}] {base['file']} {config} seed {seed}: started", file=sys.stderr, flush=True)
                 try:
                     outcome = run_agent(file, request=args.request, base_url=args.url, model=args.model,
-                                        prompt=prompt, check=check, tools=tools, options={"seed": seed},
+                                        prompt=prompt, check=check, core=core, tools=tools,
+                                        options={"seed": seed},
                                         on_event=live_progress(time.monotonic()))
                 except OllamaError as exc:
                     print(f"error: {exc}", file=sys.stderr)

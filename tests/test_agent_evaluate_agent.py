@@ -56,7 +56,8 @@ def test_compares_configs_and_scores_each_run(fake_ollama, sample, tmp_path, cap
     assert [r["options"]["seed"] for r in FakeOllama.received] == [1] * len(FakeOllama.received)
     assert (out / "notes_a3-check_seed1" / "explanation.md").is_file()
     table = capsys.readouterr().out
-    assert "| Mean tool recall (O3 target 0.9) | 0.25 | 1.00 |" in table
+    assert "| Mean tool coverage, all expected tools | 0.25 | 1.00 |" in table
+    assert "| Mean model-choice recall, non-core tools (O3 target 0.9) | 0.00 | 1.00 |" in table
 
 
 def test_expected_tools_depend_on_the_file_type(tmp_path):
@@ -71,3 +72,20 @@ def test_expected_tools_depend_on_the_file_type(tmp_path):
 @pytest.mark.parametrize("bad", ["a9", "a3+fast"])
 def test_rejects_unknown_configs(sample, bad, capsys):
     assert evaluate_agent.main([str(sample), "--configs", bad]) == 2
+
+
+def test_core_config_runs_triage_in_code(fake_ollama, sample, tmp_path):
+    FakeOllama.script = [call("strings"), answer("URL [strings]; not a PE [file_type].")]
+    out = tmp_path / "eval"
+    assert evaluate_agent.main([str(sample), str(sample), "--configs", "a3+check+core", "--runs", "1",
+                                "--url", fake_ollama, "--out", str(out)]) == 0
+    data = json.loads((out / "summary.json").read_text())
+    assert len(data["runs"]) == 1                     # the duplicate file is dropped
+    run = data["runs"][0]
+    assert run["tool_recall"] == 1.0 and run["choice_recall"] == 1.0
+    assert run["corrections"] == 0
+
+
+def test_parse_config():
+    assert evaluate_agent.parse_config("a3+check+core") == ("a3", True, True)
+    assert evaluate_agent.parse_config("a2") == ("a2", False, False)

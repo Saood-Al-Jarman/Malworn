@@ -65,7 +65,8 @@ def test_full_flow(client, app):
     location = res.headers["Location"]
     status = wait_done(client, location)
     assert status["status"] == "done", status
-    assert [e["tool"] for e in status["events"] if e["kind"] == "tool_call"] == ["hashes", "file_type", "virustotal"]
+    called = [e["tool"] for e in status["events"] if e["kind"] == "tool_call"]
+    assert called[:4] == ["hashes", "file_type", "packing_indicators", "virustotal"]  # core triage first
 
     page = client.get(location).get_data(as_text=True)
     assert "<h3>Summary</h3>" in page

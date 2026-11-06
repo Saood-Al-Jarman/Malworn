@@ -61,3 +61,26 @@ def test_correction_message_names_each_problem():
                                      "verdict": ["It appears legitimate"]})
     assert "strings" in msg and "x_y" in msg and "legitimate" in msg
     assert msg.rstrip().endswith("same format.")
+
+
+# False alarms from the Nov 6 comparison: categories and open questions, not judgements
+@pytest.mark.parametrize("text", [
+    "Short strings like `dasee` may be false positives or benign obfuscation [strings].",
+    "Verify the file's authenticity by comparing it to known legitimate binaries.",
+    "Compare the imphash against known benign samples [extra_checks].",
+    "Whether the UPX stub contains malicious code or is a legitimate packer.",
+    "Check whether it is part of a known legitimate application or installer.",
+    "Legitimate software is often packed too [packing_indicators].",
+])
+def test_categories_and_open_questions_are_not_verdicts(text):
+    assert verify.verdict_phrases(text) == []
+
+
+@pytest.mark.parametrize("text", [
+    "The file is a Windows PE executable that appears to be a legitimate application.",
+    "This file is malicious.",
+    "Overall the sample looks benign [strings].",
+    "It is safe to open.",
+])
+def test_real_verdicts_are_still_caught(text):
+    assert verify.verdict_phrases(text)

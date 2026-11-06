@@ -64,6 +64,21 @@ def unknown_citations(answer, known_tools):
     return out
 
 
+# A verdict word that names a CATEGORY of files ("known legitimate binaries",
+# "benign samples", "legitimate software is often packed") or sits in an open
+# question ("whether it is malicious or a legitimate packer") is not a
+# judgement about this file. False alarms from the Nov 6 comparison runs.
+_CATEGORY_BEFORE = re.compile(r"\b(known|against|other|many|most|some|both|like|from)\s+(\w+\s+)?$", re.IGNORECASE)
+_CATEGORY_AFTER = re.compile(r"^\s+(\w+\s+)?(samples|binaries|files|programs|software|applications|tools|"
+                             r"packers|installers|executables|code\s+and|ones)\b", re.IGNORECASE)
+_OPEN_QUESTION = re.compile(r"\bwhether\b|\?|\bif it is\b|\bfalse positives?\b|\bdistinguish", re.IGNORECASE)
+
+
+def _not_a_judgement(before, after, sentence):
+    return bool(_CATEGORY_BEFORE.search(before) or _CATEGORY_AFTER.search(after)
+                or _OPEN_QUESTION.search(sentence))
+
+
 def verdict_phrases(answer):
     """Verdict words used as a judgement (a negation earlier in the sentence excuses them)."""
     text = answer or ""
@@ -76,6 +91,8 @@ def verdict_phrases(answer):
             continue
         if re.search(r"virustotal|engines?\b|threat label", sentence, re.IGNORECASE):
             continue  # reporting VirusTotal's own finding, credited to it, is allowed
+        if _not_a_judgement(text[start:m.start()], text[m.end():], sentence):
+            continue
         found.append(" ".join(text[start:end if end != -1 else len(text)].split())[:160])
     return found
 
