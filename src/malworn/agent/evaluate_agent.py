@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,9 +84,41 @@ def score_run(outcome, expected, available):
         "cited_not_run_final": final["cited_not_run"],
         "verdict_final": final["verdict"],
         "corrections": outcome["stats"].get("corrections", 0),
+        "cutoffs": outcome["stats"].get("cutoffs", 0),
         "seconds": outcome["stats"]["seconds"],
         "output_tokens": outcome["stats"]["output_tokens"],
     }
+
+
+def live_progress(started):
+    """Print what the agent is doing while a run is in progress, so a long
+    model turn is visible instead of looking stuck."""
+    state = {"tokens": 0, "last": started}
+
+    def on_event(kind, payload):
+        now = time.monotonic()
+        stamp = f"    {now - started:5.0f}s"
+        if kind in ("thinking", "answer"):
+            state["tokens"] += 1
+            if now - state["last"] >= 15:   # a heartbeat while the model writes
+                print(f"{stamp}  model writing ({kind}, ~{state['tokens']} chunks so far)",
+                      file=sys.stderr, flush=True)
+                state["last"] = now
+            return
+        state["last"] = now
+        if kind == "tool_call":
+            print(f"{stamp}  -> {payload}", file=sys.stderr, flush=True)
+        elif kind == "tool_result":
+            print(f"{stamp}  <- {payload.tool}: {payload.status} ({payload.duration_ms} ms)",
+                  file=sys.stderr, flush=True)
+        elif kind == "check":
+            bad = [k for k, v in payload.items() if v]
+            print(f"{stamp}  answer check: {'failed (' + ', '.join(bad) + ')' if bad else 'passed'}",
+                  file=sys.stderr, flush=True)
+        elif kind in ("cutoff", "invalid_call", "repeat_call", "limit"):
+            print(f"{stamp}  {kind}: {payload}", file=sys.stderr, flush=True)
+
+    return on_event
 
 
 def summarize(rows, configs):
@@ -192,9 +225,11 @@ def main(argv=None):
             for seed in range(1, args.runs + 1):
                 done += 1
                 base = {"file": Path(file).name, "config": config, "seed": seed}
+                print(f"[{done}/{total}] {base['file']} {config} seed {seed}: started", file=sys.stderr, flush=True)
                 try:
                     outcome = run_agent(file, request=args.request, base_url=args.url, model=args.model,
-                                        prompt=prompt, check=check, tools=tools, options={"seed": seed})
+                                        prompt=prompt, check=check, tools=tools, options={"seed": seed},
+                                        on_event=live_progress(time.monotonic()))
                 except OllamaError as exc:
                     print(f"error: {exc}", file=sys.stderr)
                     return 1

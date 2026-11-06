@@ -51,6 +51,17 @@ from malworn.detection.malworn_aggregator import aggregate_agent_run, write_repo
 DEFAULT_NUM_CTX = 16384
 DEFAULT_MAX_TOOL_CALLS = 12
 
+# Cap on what the model may write in one turn (reasoning + answer). Without it,
+# Qwen 3's thinking mode can loop until the context is full: 4-5 minutes of
+# silence per turn. 4096 tokens is about 70 s at ~57 tokens/s.
+MAX_TURN_TOKENS = 4096
+# Qwen 3's recommended sampling for thinking mode. presence_penalty is its
+# advice for quantized models (Ollama's qwen3:8b is 4-bit) that repeat themselves.
+QWEN_SAMPLING = {"top_p": 0.95, "top_k": 20, "presence_penalty": 1.5}
+MAX_CUTOFF_RECOVERIES = 2
+CUTOFF_NUDGE = ("Your reasoning was cut off before you answered. Do not reason any further. "
+                "Using the tool results above, call the next tool you need or write your answer now.")
+
 # Limits on what is sent to the model per tool result (the full result still
 # goes into the report). Strings from a real sample can number in the tens of
 # thousands; the model only needs a sample of them. Lists are only shortened
@@ -197,6 +208,7 @@ def run_agent(
         "checked": check,
         "checks": state["checks"],
         "corrections": sum(1 for c in state["checks"] if c["corrected"]),
+        "cutoffs": state.get("cutoffs", 0),
         "output_tokens": sum((t.get("output_tokens") or 0) for t in state["turns"]),
         "seconds": round(time.monotonic() - started, 1),
     }
@@ -257,17 +269,32 @@ def converse(state, path, tools, base_url=DEFAULT_OLLAMA_URL, model=DEFAULT_MODE
     emit = emit or (lambda kind, payload: None)
     by_name = {t.name: t for t in tools}
     definitions = [t.ollama_definition() for t in tools]
-    options = dict(DEFAULT_OPTIONS, num_ctx=num_ctx, **(options or {}))
+    options = {**DEFAULT_OPTIONS, **QWEN_SAMPLING, "num_ctx": num_ctx,
+               "num_predict": MAX_TURN_TOKENS, **(options or {})}
     messages, results = state["messages"], state["results"]
     calls_here = 0
+    recoveries = 0
+    think_now = think
 
     while True:
         offer_tools = calls_here < max_tool_calls
-        reply = chat(messages, base_url=base_url, model=model, options=options, think=think,
+        reply = chat(messages, base_url=base_url, model=model, options=options, think=think_now,
                      timeout=timeout, on_token=emit,
                      tools=definitions if offer_tools else None)
+        think_now = think
         state["turns"].append(reply["stats"])
         tool_calls = reply["tool_calls"] if offer_tools else []
+
+        if not tool_calls and not reply["answer"].strip() and recoveries < MAX_CUTOFF_RECOVERIES:
+            # The turn ended with reasoning but no answer (usually the token cap).
+            # Ask again without thinking mode, so it answers directly.
+            recoveries += 1
+            state.setdefault("cutoffs", 0)
+            state["cutoffs"] += 1
+            emit("cutoff", reply["stats"].get("done_reason") or "empty")
+            messages.append({"role": "user", "content": CUTOFF_NUDGE})
+            think_now = False
+            continue
 
         assistant = {"role": "assistant", "content": reply["answer"]}
         if reply["thinking"]:
@@ -457,6 +484,8 @@ def main(argv=None):
             err(f"\n[tool] model called {payload} again (cached result sent)")
         elif kind == "limit":
             err(f"\n[tool] reached the limit of {payload} tool calls; asking for the answer")
+        elif kind == "cutoff":
+            err(f"\n[model] turn ended without an answer ({payload}); asking it to answer directly")
         elif kind == "check":
             bad = {k: v for k, v in payload.items() if v}
             err("\n[check] answer passed" if not bad else f"\n[check] answer failed: {bad}")

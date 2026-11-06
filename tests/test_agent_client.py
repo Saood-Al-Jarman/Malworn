@@ -100,6 +100,7 @@ def test_chat_streams_thinking_and_answer(fake_ollama):
     assert result["stats"] == {
         "prompt_tokens": 210,
         "output_tokens": 100,
+        "done_reason": None,
         "total_seconds": 3.5,
         "tokens_per_second": 50.0,
     }

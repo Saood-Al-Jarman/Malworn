@@ -388,3 +388,35 @@ def test_seed_override_reaches_the_model(fake_ollama, sample):
     FakeOllama.script = [answer("done")]
     run(sample, fake_ollama, options={"seed": 7})
     assert FakeOllama.received[0]["options"]["seed"] == 7
+
+
+# ---------------------------------------------------------------------------
+# Runaway reasoning: turns are capped, and a turn with no answer is retried
+# ---------------------------------------------------------------------------
+def test_turns_are_capped_and_use_qwen_sampling(fake_ollama, sample):
+    FakeOllama.script = [answer("done")]
+    run(sample, fake_ollama)
+    opts = FakeOllama.received[0]["options"]
+    assert opts["num_predict"] == loop.MAX_TURN_TOKENS
+    assert opts["top_k"] == 20 and opts["top_p"] == 0.95 and opts["presence_penalty"] == 1.5
+
+
+def test_a_turn_cut_off_mid_reasoning_is_retried_without_thinking(fake_ollama, sample):
+    cut = [{"message": {"role": "assistant", "thinking": "Let me think about this very long..."}},
+           dict(DONE, done_reason="length")]
+    FakeOllama.script = [cut, answer("The answer.")]
+    outcome = run(sample, fake_ollama)
+
+    retry = FakeOllama.received[1]
+    assert retry["think"] is False
+    assert retry["messages"][-1]["content"] == loop.CUTOFF_NUDGE
+    assert outcome["explanation"] == "The answer."
+    assert outcome["stats"]["cutoffs"] == 1
+
+
+def test_cutoff_recovery_is_limited(fake_ollama, sample):
+    cut = [{"message": {"role": "assistant", "thinking": "..."}}, dict(DONE, done_reason="length")]
+    FakeOllama.script = [cut, cut, cut]
+    outcome = run(sample, fake_ollama)
+    assert len(FakeOllama.received) == 1 + loop.MAX_CUTOFF_RECOVERIES
+    assert outcome["explanation"] == ""

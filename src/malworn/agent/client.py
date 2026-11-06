@@ -184,6 +184,7 @@ def _stats(final):
     stats = {
         "prompt_tokens": final.get("prompt_eval_count"),
         "output_tokens": tokens,
+        "done_reason": final.get("done_reason"),  # "length" = hit num_predict
         "total_seconds": round(final["total_duration"] / 1e9, 1)
         if final.get("total_duration")
         else None,
