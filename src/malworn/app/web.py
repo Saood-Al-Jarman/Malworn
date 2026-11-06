@@ -205,6 +205,11 @@ class Jobs:
                 job["events"].append({"kind": kind, "tool": payload})
             elif kind == "limit":
                 job["events"].append({"kind": "limit", "tool": str(payload)})
+            elif kind == "check":
+                failed = [k for k, v in payload.items() if v]
+                job["events"].append({"kind": "check", "tool": ", ".join(failed)})
+                if failed:
+                    job["answer"] = ""
 
     def start(self, run_id, run_dir, sample, meta):
         with self.lock:

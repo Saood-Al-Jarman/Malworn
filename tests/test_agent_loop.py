@@ -9,7 +9,7 @@ import types
 import pytest
 
 from malworn.agent import loop, tools as agent_tools
-from malworn.agent.prompts import AGENT_A2_SYSTEM
+from malworn.agent.prompts import AGENT_A3_SYSTEM
 from malworn.contract import ToolSpec
 
 from tests.conftest import DONE, FakeOllama
@@ -40,6 +40,8 @@ def sample(tmp_path):
 
 
 def run(sample, url, **kwargs):
+    """Loop mechanics tests turn the answer check off; it has its own tests below."""
+    kwargs.setdefault("check", False)
     return loop.run_agent(sample, base_url=url, **kwargs)
 
 
@@ -68,7 +70,7 @@ def test_what_the_model_is_sent(fake_ollama, sample):
     run(sample, fake_ollama)
     first, second = FakeOllama.received
 
-    assert first["messages"][0] == {"role": "system", "content": AGENT_A2_SYSTEM}
+    assert first["messages"][0] == {"role": "system", "content": AGENT_A3_SYSTEM}
     assert '"file_name": "invoice.exe"' in first["messages"][1]["content"]
     assert [t["function"]["name"] for t in first["tools"]] == ALL_TOOLS
     assert first["tools"][0]["function"]["parameters"] == {"type": "object", "properties": {}, "required": []}
@@ -335,3 +337,54 @@ def test_followup_does_not_rerun_old_tools(fake_ollama, sample, saved_run, monke
 def test_followup_rejects_an_empty_question(saved_run, sample):
     with pytest.raises(ValueError):
         loop.ask_followup(saved_run, sample, "   ")
+
+
+# ---------------------------------------------------------------------------
+# The answer check (agent/verify.py) inside the loop
+# ---------------------------------------------------------------------------
+def test_check_passes_a_clean_answer_without_a_correction(fake_ollama, sample):
+    FakeOllama.script = [call("hashes", "file_type"), answer("Not a PE [file_type]; hash in [hashes].")]
+    outcome = run(sample, fake_ollama, check=True)
+    assert outcome["stats"]["corrections"] == 0
+    assert outcome["stats"]["checks"][0]["problems"]["cited_not_run"] == []
+    assert len(FakeOllama.received) == 2
+
+
+def test_check_makes_the_model_call_a_tool_it_cited(fake_ollama, sample):
+    FakeOllama.script = [
+        call("file_type"),
+        answer("No URLs [strings]. Next: compute the imphash [extra_checks]."),
+        call("strings"),                                   # the correction turn: it calls one tool
+        answer("It contains a URL [strings]."),            # and drops the other claim
+    ]
+    outcome = run(sample, fake_ollama, check=True)
+
+    correction = FakeOllama.received[2]["messages"][-1]["content"]
+    assert "strings, extra_checks" in correction and "not run" in correction
+    assert outcome["explanation"] == "It contains a URL [strings]."
+    assert outcome["agent_run"]["selected_tools"] == ["file_type", "strings"]
+    stats = outcome["stats"]
+    assert stats["corrections"] == 1
+    assert [bool(c["problems"]["cited_not_run"]) for c in stats["checks"]] == [True, False]
+
+
+def test_check_gives_one_correction_only(fake_ollama, sample):
+    FakeOllama.script = [answer("Looks legitimate [strings]."), answer("Still legitimate [strings].")]
+    outcome = run(sample, fake_ollama, check=True)
+    assert outcome["explanation"] == "Still legitimate [strings]."
+    assert len(FakeOllama.received) == 2
+    last = outcome["stats"]["checks"][-1]
+    assert last["problems"]["verdict"] and not last["corrected"]   # recorded as still failing
+
+
+def test_followup_answers_are_checked_too(fake_ollama, sample, saved_run):
+    FakeOllama.script = [answer("The file is benign [hashes]."), answer("The hash is in [hashes].")]
+    result = loop.ask_followup(saved_run, sample, "Is it safe?", base_url=fake_ollama)
+    assert result["answer"] == "The hash is in [hashes]."
+    assert "verdict language" in FakeOllama.received[1]["messages"][-1]["content"]
+
+
+def test_seed_override_reaches_the_model(fake_ollama, sample):
+    FakeOllama.script = [answer("done")]
+    run(sample, fake_ollama, options={"seed": 7})
+    assert FakeOllama.received[0]["options"]["seed"] == 7
