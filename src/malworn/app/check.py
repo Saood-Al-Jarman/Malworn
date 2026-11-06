@@ -58,11 +58,16 @@ def check_diec():
 
 
 def check_flask():
-    try:
-        import flask  # noqa: F401
-    except ImportError:
-        return False, "Flask isn't installed: python3 -m pip install --user flask (with NAT on)"
-    return True, "Flask installed"
+    missing = []
+    for name in ("flask", "pefile"):
+        try:
+            __import__(name)
+        except ImportError:
+            missing.append(name)
+    if missing:
+        return False, (f"not installed: {', '.join(missing)}. With the VM on NAT: "
+                       f"python3 -m pip install --user --break-system-packages {' '.join(missing)}")
+    return True, "Flask and pefile installed"
 
 
 def check_tools():
@@ -93,7 +98,7 @@ def main():
         ("Model", lambda: check_ollama(url, model)),
         ("VirusTotal", lambda: check_bridge(os.environ.get("MALWORN_VT_BRIDGE", DEFAULT_BRIDGE))),
         ("Detect It Easy", check_diec),
-        ("Web app", check_flask),
+        ("Libraries", check_flask),
         ("Tools", check_tools),
         ("Data", lambda: check_data(os.environ.get("MALWORN_DATA", "~/malworn-data"))),
     ]

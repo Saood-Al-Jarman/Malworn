@@ -153,13 +153,19 @@ def run_agent(
     timeout=DEFAULT_TIMEOUT,
     tools=None,
     on_event=None,
+    check=True,
+    options=None,
 ):
     """Run the agent on one file. Returns a dict with the agent run (the input
     to Hassan's aggregator), the aggregated report, the transcript and stats.
 
     ``on_event(kind, payload)`` is called as things happen; kinds are
     "thinking", "answer", "tool_call", "tool_result", "invalid_call",
-    "repeat_call", "limit".
+    "repeat_call", "limit", "check".
+
+    ``check`` runs agent.verify on the answer and gives the model one
+    correction turn if it cites tools that didn't run or uses verdict
+    language. ``options`` overrides model options (e.g. {"seed": 3}).
     """
     emit = on_event or (lambda kind, payload: None)
     path = Path(file_path)
@@ -174,8 +180,9 @@ def run_agent(
         {"role": "user", "content": first_message(info, request)},
     ])
     started = time.monotonic()
-    explanation = converse(state, path, tools, base_url=base_url, model=model, think=think,
-                           max_tool_calls=max_tool_calls, num_ctx=num_ctx, timeout=timeout, emit=emit)
+    explanation = converse_checked(state, path, tools, check=check, base_url=base_url, model=model,
+                                   think=think, max_tool_calls=max_tool_calls, num_ctx=num_ctx,
+                                   timeout=timeout, emit=emit, options=options)
 
     agent_run = build_agent_run(info, tools, state, explanation)
     report = aggregate_agent_run(agent_run)
@@ -187,6 +194,9 @@ def run_agent(
         "tool_calls": state["calls_made"],
         "invalid_calls": state["invalid_calls"],
         "repeat_calls": state["repeat_calls"],
+        "checked": check,
+        "checks": state["checks"],
+        "corrections": sum(1 for c in state["checks"] if c["corrected"]),
         "output_tokens": sum((t.get("output_tokens") or 0) for t in state["turns"]),
         "seconds": round(time.monotonic() - started, 1),
     }
@@ -197,7 +207,7 @@ def run_agent(
 def new_state(messages, results=None, selected=None):
     """The conversation so far: messages, tool results (name -> ToolResult) and counters."""
     return {"messages": messages, "results": dict(results or {}), "selected": list(selected or []),
-            "invalid_calls": [], "repeat_calls": [], "calls_made": 0, "turns": []}
+            "invalid_calls": [], "repeat_calls": [], "calls_made": 0, "turns": [], "checks": []}
 
 
 def build_agent_run(info, tools, state, explanation):
@@ -211,9 +221,33 @@ def build_agent_run(info, tools, state, explanation):
     }
 
 
+def converse_checked(state, path, tools, check=True, max_corrections=1, emit=None, **kwargs):
+    """converse(), then check the answer (agent.verify) and, if it fails, give
+    the model up to ``max_corrections`` turns to fix it. Every check is
+    recorded in state["checks"]."""
+    from malworn.agent import verify
+
+    emit = emit or (lambda kind, payload: None)
+    answer = converse(state, path, tools, emit=emit, **kwargs)
+    if not check:
+        return answer
+    names = [t.name for t in tools]
+    for attempt in range(max_corrections + 1):
+        problems = verify.check_answer(answer, state["results"], names)
+        failed = verify.has_problems(problems)
+        state["checks"].append({"attempt": attempt, "problems": problems,
+                                "corrected": failed and attempt < max_corrections})
+        emit("check", problems)
+        if not failed or attempt == max_corrections:
+            return answer
+        state["messages"].append({"role": "user", "content": verify.correction_message(problems)})
+        answer = converse(state, path, tools, emit=emit, **kwargs)
+    return answer
+
+
 def converse(state, path, tools, base_url=DEFAULT_OLLAMA_URL, model=DEFAULT_MODEL, think=True,
              max_tool_calls=DEFAULT_MAX_TOOL_CALLS, num_ctx=DEFAULT_NUM_CTX,
-             timeout=DEFAULT_TIMEOUT, emit=None):
+             timeout=DEFAULT_TIMEOUT, emit=None, options=None):
     """Talk to the model until it stops calling tools; returns its final answer.
 
     Tool calls are run on ``path`` and recorded in ``state``. A tool already in
@@ -223,7 +257,7 @@ def converse(state, path, tools, base_url=DEFAULT_OLLAMA_URL, model=DEFAULT_MODE
     emit = emit or (lambda kind, payload: None)
     by_name = {t.name: t for t in tools}
     definitions = [t.ollama_definition() for t in tools]
-    options = dict(DEFAULT_OPTIONS, num_ctx=num_ctx)
+    options = dict(DEFAULT_OPTIONS, num_ctx=num_ctx, **(options or {}))
     messages, results = state["messages"], state["results"]
     calls_here = 0
 
@@ -305,7 +339,7 @@ FOLLOWUP_TEMPLATE = (
 
 def ask_followup(run_dir, file_path, question, base_url=DEFAULT_OLLAMA_URL, model=DEFAULT_MODEL,
                  think=True, max_tool_calls=6, num_ctx=DEFAULT_NUM_CTX, timeout=DEFAULT_TIMEOUT,
-                 tools=None, on_event=None, html=True):
+                 tools=None, on_event=None, html=True, check=True):
     """Answer a follow-up question about a saved analysis.
 
     Continues the saved conversation, so the model sees all earlier tool
@@ -329,8 +363,9 @@ def ask_followup(run_dir, file_path, question, base_url=DEFAULT_OLLAMA_URL, mode
     before = set(results)
 
     started = time.monotonic()
-    answer = converse(state, Path(file_path), tools, base_url=base_url, model=model, think=think,
-                      max_tool_calls=max_tool_calls, num_ctx=num_ctx, timeout=timeout, emit=on_event)
+    answer = converse_checked(state, Path(file_path), tools, check=check, base_url=base_url, model=model,
+                              think=think, max_tool_calls=max_tool_calls, num_ctx=num_ctx,
+                              timeout=timeout, emit=on_event)
     seconds = round(time.monotonic() - started, 1)
     new_tools = [name for name in state["selected"] if name not in before]
 
@@ -354,7 +389,7 @@ def ask_followup(run_dir, file_path, question, base_url=DEFAULT_OLLAMA_URL, mode
     except (OSError, ValueError):
         history = []
     history.append({"question": question, "answer": answer, "new_tools": new_tools,
-                    "seconds": seconds, "asked_at": datetime.now(timezone.utc).isoformat()})
+                    "seconds": seconds, "checks": state["checks"], "asked_at": datetime.now(timezone.utc).isoformat()})
     _write_json(chat_file, history)
     return {"answer": answer, "new_tools": new_tools, "seconds": seconds}
 
@@ -380,6 +415,8 @@ def parse_args(argv=None):
     parser.add_argument("--no-html", action="store_true", help="don't write report.html")
     parser.add_argument("--hide-thinking", action="store_true", help="don't print the model's reasoning")
     parser.add_argument("--no-think", action="store_true", help="turn off Qwen's thinking mode")
+    parser.add_argument("--no-check", action="store_true",
+                        help="don't check the answer's citations and verdict language (agent.verify)")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     return parser.parse_args(argv)
 
@@ -420,13 +457,16 @@ def main(argv=None):
             err(f"\n[tool] model called {payload} again (cached result sent)")
         elif kind == "limit":
             err(f"\n[tool] reached the limit of {payload} tool calls; asking for the answer")
+        elif kind == "check":
+            bad = {k: v for k, v in payload.items() if v}
+            err("\n[check] answer passed" if not bad else f"\n[check] answer failed: {bad}")
 
     try:
         outcome = run_agent(
             path, request=args.request, original_name=args.name, base_url=args.url,
             model=args.model, prompt=args.prompt, think=not args.no_think,
             max_tool_calls=args.max_tool_calls, num_ctx=args.num_ctx, timeout=args.timeout,
-            tools=tools, on_event=on_event,
+            tools=tools, on_event=on_event, check=not args.no_check,
         )
     except OllamaError as exc:
         err(f"\nerror: {exc}")

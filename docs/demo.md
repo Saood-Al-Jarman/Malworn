@@ -20,7 +20,7 @@ The sample never leaves the VM. Only text (tool descriptions and results) goes t
 ### Windows
 
 1. **Ollama** is already set up (`docs/ollama-setup.md`): `OLLAMA_HOST=192.168.5.1:11434` and the firewall rule "Ollama - Malworn VM only".
-2. **Python 3.11 or newer.** Check with `python --version` in PowerShell; if it's missing, install it from python.org and tick "Add python.exe to PATH".
+2. **Python 3.10 or newer.** Check with `python --version` in PowerShell; if it's missing, install it from python.org and tick "Add python.exe to PATH". (The bridge uses only the standard library.)
 3. **A copy of the repo** (code only; samples never go on Windows):
    ```powershell
    cd $HOME
@@ -41,12 +41,13 @@ The sample never leaves the VM. Only text (tool descriptions and results) goes t
 ### VM (only while it's clean: no sample has been opened since the snapshot)
 
 1. In VMware, switch the network adapter to **NAT**.
-2. Update the code and install Flask:
+2. Update the code and install the two Python libraries it needs (Flask for the web app, pefile for the tools):
    ```bash
    cd ~/Malworn
-   git fetch && git checkout saood/agent-loop && git pull     # main, once PR #8 is merged
-   python3 -m pip install --user flask || python3 -m pip install --user --break-system-packages flask
+   git fetch origin && git checkout main && git reset --hard origin/main
+   python3 -m pip install --user --break-system-packages flask pefile
    ```
+   `--break-system-packages` is needed on recent REMnux; it installs into your user folder only. A warning about `types-flask-migrate` is harmless.
 3. Make two **harmless** test files: a small Windows launcher program that ships inside the official setuptools package on PyPI, and a UPX-packed copy of it.
    ```bash
    mkdir -p ~/demo-files && cd ~/demo-files
@@ -89,6 +90,14 @@ The first analysis takes longer while Ollama loads the model onto the GPU (10–
 5. **Ask a follow-up**, e.g. "Which sections look packed, and why?" or "What does the imphash tell me?". The model may run a tool it hasn't run yet; the report updates.
 6. **Safety points:** the sample is stored under its SHA-256, read-only and not executable; the model runs locally; the VirusTotal key never enters the VM.
 
+## Measuring the agent (for the report)
+
+Runs the full agent several times on each file and compares prompt versions: whether the model called the right tools (sub-objective O3), whether its answer cites tools that never ran, verdict language, and time (O4). About a minute per analysis, so the default (2 files × 2 configurations × 3 seeds = 12 analyses) takes about 12–15 minutes.
+```bash
+PYTHONPATH=src python3 -m malworn.agent.evaluate_agent ~/demo-files/launcher.exe ~/demo-files/launcher_upx.exe
+```
+Results go to `runs/agent_eval_<time>/summary.md`. Copy that folder out of the VM before reverting.
+
 ## Without the bridge or a key
 
 To demo without VirusTotal, in the VM:
@@ -109,6 +118,7 @@ Output goes to `runs/agent_<sha>_<time>/` (report.json, report.html, explanation
 
 | What you see | Fix |
 |---|---|
+| `check`: `No module named 'pefile'` (or `'flask'`) | Switch the VM to NAT briefly: `python3 -m pip install --user --break-system-packages pefile flask` |
 | `check`: can't reach Ollama | Ollama running on Windows? `OLLAMA_HOST=192.168.5.1:11434` set? VM adapter on host-only? |
 | `check`: qwen3:8b isn't pulled | On Windows: `ollama pull qwen3:8b` |
 | `check`: can't reach the VirusTotal bridge | Bridge running in PowerShell? Firewall rule for 8770? Or use `MALWORN_VT_MODE=mock` |

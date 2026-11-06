@@ -61,6 +61,9 @@
             else if (e.kind === "invalid_call") line("model asked for an unknown tool: " + e.tool, "note");
             else if (e.kind === "repeat_call") line("model asked for " + e.tool + " again (earlier result reused)", "note");
             else if (e.kind === "limit") line("tool-call limit reached; asking for the answer", "note");
+            else if (e.kind === "check")
+              line(e.tool ? "answer check failed (" + e.tool.replace(/_/g, " ") + "); asking the model to fix it"
+                          : "answer check passed", e.tool ? "note" : "ok");
           });
           seen = s.event_count;
           thinking.textContent = s.thinking;
