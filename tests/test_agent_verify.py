@@ -76,6 +76,9 @@ def test_correction_message_names_each_problem():
     "Inspect strings and resources in the unpacked file to identify potential malicious indicators.",
     "Inspect imports and strings of the unpacked file to identify potential malicious activity.",
     "Analyze the unpacked file to identify potential indicators of malicious behavior.",
+    # Nov 7 evening run
+    "Consider running `strings` or `imports` to examine potential malicious APIs, embedded data.",
+    "Short strings like `dasee` appear random and may be packing artifacts or benign data.",
 ])
 def test_categories_and_open_questions_are_not_verdicts(text):
     assert verify.verdict_phrases(text) == []
@@ -86,6 +89,7 @@ def test_categories_and_open_questions_are_not_verdicts(text):
     "This file is malicious.",
     "Overall the sample looks benign [strings].",
     "It is safe to open.",
+    "The analysis shows standard imports and strings consistent with a legitimate application.",
 ])
 def test_real_verdicts_are_still_caught(text):
     assert verify.verdict_phrases(text)

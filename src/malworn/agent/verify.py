@@ -71,7 +71,7 @@ def unknown_citations(answer, known_tools):
 _CATEGORY_BEFORE = re.compile(r"\b(known|against|other|many|most|some|both|like|from)\s+(\w+\s+)?$", re.IGNORECASE)
 _CATEGORY_AFTER = re.compile(r"^\s+(\w+\s+)?(samples|binaries|files|programs|software|applications|tools|"
                              r"packers|installers|executables|code\s+and|ones|indicators?|behaviou?rs?|activit(?:y|ies)|"
-                             r"intent|patterns?|functionality|traits|characteristics|purposes?)\b", re.IGNORECASE)
+                             r"intent|patterns?|functionality|traits|characteristics|purposes?|apis?|api\s+calls|functions|data|content|payloads?)\b", re.IGNORECASE)
 # "legitimate or malicious", "malicious or benign": naming the open alternatives, not choosing one
 _VERDICT_ALT = r"(?:malicious|benign|legitimate|safe|clean|harmless)"
 _ALTERNATIVE_BEFORE = re.compile(_VERDICT_ALT + r"\s+or\s+$", re.IGNORECASE)
