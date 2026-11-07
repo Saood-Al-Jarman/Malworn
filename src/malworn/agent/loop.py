@@ -68,6 +68,16 @@ CORE_TOOLS = ("hashes", "file_type", "packing_indicators", "virustotal")
 CORE_NOTE = ("The core triage tools ({names}) have already been run for you; their results are "
              "below. Do not call them again. Decide which of the other tools this request needs, "
              "call them, then answer.")
+ALL_NOTE = ("Every analysis tool ({names}) has already been run on this file; the results are below. "
+            "Do not call them again. Explain the evidence to the analyst.")
+
+# What runs in code before the model starts:
+#   "all"  - every tool: the full first-level analysis (the web upload and the CLI default).
+#            In the Nov 6 comparison Qwen 3 8B chose only about half of the optional tools,
+#            so a full report runs them all; the model explains.
+#   "core" - CORE_TOOLS; the model chooses the rest.
+#   "none" - the model chooses every tool (narrow questions, the O3 measurement).
+PRESETS = ("all", "core", "none")
 CUTOFF_NUDGE = ("Your reasoning was cut off before you answered. Do not reason any further. "
                 "Using the tool results above, call the next tool you need or write your answer now.")
 
@@ -175,7 +185,8 @@ def run_agent(
     on_event=None,
     check=True,
     options=None,
-    core=True,
+    preset="all",
+    core=None,
 ):
     """Run the agent on one file. Returns a dict with the agent run (the input
     to Hassan's aggregator), the aggregated report, the transcript and stats.
@@ -184,7 +195,8 @@ def run_agent(
     "thinking", "answer", "tool_call", "tool_result", "invalid_call",
     "repeat_call", "limit", "check".
 
-    ``core`` runs CORE_TOOLS in code before the model starts (see above).
+    ``preset`` says which tools run in code before the model starts (see
+    PRESETS). ``core=True/False`` is the older spelling of preset="core"/"none".
     ``check`` runs agent.verify on the answer and gives the model one
     correction turn if it cites tools that didn't run or uses verdict
     language. ``options`` overrides model options (e.g. {"seed": 3}).
@@ -197,10 +209,21 @@ def run_agent(
         tools, _ = load_tools()
 
     info = file_info(path, original_name)
-    core_names = [name for name in CORE_TOOLS if name in {t.name for t in tools}] if core else []
+    if core is not None:
+        preset = "core" if core else "none"
+    if preset not in PRESETS:
+        raise ValueError(f"preset must be one of {PRESETS}")
+    available = [t.name for t in tools]
+    if preset == "all":
+        core_names = available
+    elif preset == "core":
+        core_names = [name for name in CORE_TOOLS if name in available]
+    else:
+        core_names = []
     opening = first_message(info, request)
     if core_names:
-        opening += "\n\n" + CORE_NOTE.format(names=", ".join(core_names))
+        note = ALL_NOTE if preset == "all" else CORE_NOTE
+        opening += "\n\n" + note.format(names=", ".join(core_names))
     state = new_state([
         {"role": "system", "content": AGENT_PROMPTS[prompt]},
         {"role": "user", "content": opening},
@@ -223,6 +246,7 @@ def run_agent(
         "invalid_calls": state["invalid_calls"],
         "repeat_calls": state["repeat_calls"],
         "checked": check,
+        "preset": preset,
         "core_tools": core_names,
         "checks": state["checks"],
         "corrections": sum(1 for c in state["checks"] if c["corrected"]),
@@ -477,8 +501,9 @@ def parse_args(argv=None):
     parser.add_argument("--no-html", action="store_true", help="don't write report.html")
     parser.add_argument("--hide-thinking", action="store_true", help="don't print the model's reasoning")
     parser.add_argument("--no-think", action="store_true", help="turn off Qwen's thinking mode")
-    parser.add_argument("--no-core", action="store_true",
-                        help="let the model choose every tool (don't run the core triage tools first)")
+    parser.add_argument("--tools", choices=PRESETS, default="all",
+                        help="which tools run before the model starts: all (full analysis, default), "
+                             "core (core triage, the model picks the rest) or none (the model picks all)")
     parser.add_argument("--no-check", action="store_true",
                         help="don't check the answer's citations and verdict language (agent.verify)")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
@@ -532,7 +557,7 @@ def main(argv=None):
             path, request=args.request, original_name=args.name, base_url=args.url,
             model=args.model, prompt=args.prompt, think=not args.no_think,
             max_tool_calls=args.max_tool_calls, num_ctx=args.num_ctx, timeout=args.timeout,
-            tools=tools, on_event=on_event, check=not args.no_check, core=not args.no_core,
+            tools=tools, on_event=on_event, check=not args.no_check, preset=args.tools,
         )
     except OllamaError as exc:
         err(f"\nerror: {exc}")

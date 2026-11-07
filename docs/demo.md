@@ -98,6 +98,12 @@ PYTHONPATH=src python3 -m malworn.agent.evaluate_agent ~/demo-files/launcher.exe
 ```
 Results go to `runs/agent_eval_<time>/summary.md`. Copy that folder out of the VM before reverting.
 
+A full analysis (the web upload) runs **every tool in code** and the model explains the results; follow-up questions are where the model chooses tools. Tool selection (sub-objective O3) is measured on 12 analyst questions with an answer key (about 10 minutes for both files):
+```bash
+PYTHONPATH=src python3 -m malworn.agent.evaluate_questions ~/demo-files/launcher.exe ~/demo-files/launcher_upx.exe
+```
+Results go to `runs/questions_eval_<time>/summary.md`. The command-line agent takes `--tools all|core|none` to choose what runs before the model starts.
+
 ## Without the bridge or a key
 
 To demo without VirusTotal, in the VM:

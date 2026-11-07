@@ -208,7 +208,7 @@ def test_a_new_tool_is_picked_up_without_changing_the_agent(monkeypatch):
 def test_main_writes_the_report_files(fake_ollama, sample, tmp_path, capsys):
     FakeOllama.script = [call("hashes", "file_type"), answer("## Summary\nA small file [hashes].")]
     out = tmp_path / "out"
-    code = loop.main([str(sample), "--url", fake_ollama, "--out", str(out), "--no-core"])
+    code = loop.main([str(sample), "--url", fake_ollama, "--out", str(out), "--tools", "none"])
     assert code == 0
 
     assert {p.name for p in out.iterdir()} == {"report.json", "report.html", "explanation.md", "transcript.json", "agent_run.json"}
@@ -443,3 +443,17 @@ def test_core_tools_are_not_rerun_when_the_model_calls_them(fake_ollama, sample)
     outcome = run(sample, fake_ollama, core=True)
     assert outcome["stats"]["repeat_calls"] == ["hashes"]
     assert outcome["agent_run"]["selected_tools"].count("hashes") == 1
+
+
+def test_full_analysis_runs_every_tool_in_code(fake_ollama, sample):
+    FakeOllama.script = [answer("Explained [hashes].")]
+    outcome = run(sample, fake_ollama, core=None, preset="all")
+    assert outcome["agent_run"]["selected_tools"] == ALL_TOOLS
+    assert "Every analysis tool" in FakeOllama.received[0]["messages"][1]["content"]
+    assert len(FakeOllama.received) == 1        # one model turn: it only explains
+    assert outcome["stats"]["preset"] == "all"
+
+
+def test_unknown_preset_is_refused(fake_ollama, sample):
+    with pytest.raises(ValueError):
+        run(sample, fake_ollama, core=None, preset="some")

@@ -25,7 +25,7 @@ Usage (inside the VM, from the repo root; each run takes about a minute):
     PYTHONPATH=src python3 -m malworn.agent.evaluate_agent FILES... --configs a2 a3 --runs 3
 
 Configurations: a name is a prompt version; "+check" turns the answer check on;
-"+core" runs the core triage tools in code first.
+"+core" runs the core triage tools in code first; "+all" runs every tool.
 Default: "a2" (Nov 4 baseline), "a3+check", "a3+check+core".
 
 Output: runs/agent_eval_<time>/summary.md, summary.json and one folder per run.
@@ -50,12 +50,14 @@ NON_PE_EXPECTED = ("hashes", "file_type", "strings", "virustotal")
 
 
 def parse_config(name):
-    """'a3+check+core' -> ('a3', check=True, core=True)."""
+    """'a3+check+core' -> ('a3', check=True, preset='core'). '+all' runs every tool in code."""
     prompt, *flags = name.split("+")
-    if prompt not in AGENT_PROMPTS or any(f not in ("check", "core") for f in flags):
+    if prompt not in AGENT_PROMPTS or any(f not in ("check", "core", "all") for f in flags) \
+            or ("core" in flags and "all" in flags):
         raise ValueError(f"Unknown configuration {name!r}: use a prompt ({', '.join(AGENT_PROMPTS)}), "
-                         "optionally followed by +check and/or +core")
-    return prompt, "check" in flags, "core" in flags
+                         "optionally followed by +check and one of +core / +all")
+    preset = "all" if "all" in flags else "core" if "core" in flags else "none"
+    return prompt, "check" in flags, preset
 
 
 def is_pe(path):
@@ -231,14 +233,14 @@ def main(argv=None):
     rows, done = [], 0
     for file in args.files:
         expected = expected_tools(file, available)
-        for config, (prompt, check, core) in configs.items():
+        for config, (prompt, check, preset) in configs.items():
             for seed in range(1, args.runs + 1):
                 done += 1
                 base = {"file": Path(file).name, "config": config, "seed": seed}
                 print(f"[{done}/{total}] {base['file']} {config} seed {seed}: started", file=sys.stderr, flush=True)
                 try:
                     outcome = run_agent(file, request=args.request, base_url=args.url, model=args.model,
-                                        prompt=prompt, check=check, core=core, tools=tools,
+                                        prompt=prompt, check=check, preset=preset, tools=tools,
                                         options={"seed": seed},
                                         on_event=live_progress(time.monotonic()))
                 except OllamaError as exc:

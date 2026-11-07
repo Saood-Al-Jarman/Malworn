@@ -87,5 +87,8 @@ def test_core_config_runs_triage_in_code(fake_ollama, sample, tmp_path):
 
 
 def test_parse_config():
-    assert evaluate_agent.parse_config("a3+check+core") == ("a3", True, True)
-    assert evaluate_agent.parse_config("a2") == ("a2", False, False)
+    assert evaluate_agent.parse_config("a3+check+core") == ("a3", True, "core")
+    assert evaluate_agent.parse_config("a3+check+all") == ("a3", True, "all")
+    assert evaluate_agent.parse_config("a2") == ("a2", False, "none")
+    with pytest.raises(ValueError):
+        evaluate_agent.parse_config("a3+core+all")

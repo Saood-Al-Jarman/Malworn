@@ -70,12 +70,18 @@ def unknown_citations(answer, known_tools):
 # judgement about this file. False alarms from the Nov 6 comparison runs.
 _CATEGORY_BEFORE = re.compile(r"\b(known|against|other|many|most|some|both|like|from)\s+(\w+\s+)?$", re.IGNORECASE)
 _CATEGORY_AFTER = re.compile(r"^\s+(\w+\s+)?(samples|binaries|files|programs|software|applications|tools|"
-                             r"packers|installers|executables|code\s+and|ones)\b", re.IGNORECASE)
+                             r"packers|installers|executables|code\s+and|ones|indicators?|behaviou?rs?|activit(?:y|ies)|"
+                             r"intent|patterns?|functionality|traits|characteristics|purposes?)\b", re.IGNORECASE)
+# "legitimate or malicious", "malicious or benign": naming the open alternatives, not choosing one
+_VERDICT_ALT = r"(?:malicious|benign|legitimate|safe|clean|harmless)"
+_ALTERNATIVE_BEFORE = re.compile(_VERDICT_ALT + r"\s+or\s+$", re.IGNORECASE)
+_ALTERNATIVE_AFTER = re.compile(r"^\s+or\s+" + _VERDICT_ALT + r"\b", re.IGNORECASE)
 _OPEN_QUESTION = re.compile(r"\bwhether\b|\?|\bif it is\b|\bfalse positives?\b|\bdistinguish", re.IGNORECASE)
 
 
 def _not_a_judgement(before, after, sentence):
     return bool(_CATEGORY_BEFORE.search(before) or _CATEGORY_AFTER.search(after)
+                or _ALTERNATIVE_BEFORE.search(before) or _ALTERNATIVE_AFTER.search(after)
                 or _OPEN_QUESTION.search(sentence))
 
 

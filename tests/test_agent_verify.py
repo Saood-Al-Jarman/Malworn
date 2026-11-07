@@ -71,6 +71,11 @@ def test_correction_message_names_each_problem():
     "Whether the UPX stub contains malicious code or is a legitimate packer.",
     "Check whether it is part of a known legitimate application or installer.",
     "Legitimate software is often packed too [packing_indicators].",
+    # Nov 7 run
+    "The purpose of the file (legitimate or malicious) requires dynamic analysis or additional context.",
+    "Inspect strings and resources in the unpacked file to identify potential malicious indicators.",
+    "Inspect imports and strings of the unpacked file to identify potential malicious activity.",
+    "Analyze the unpacked file to identify potential indicators of malicious behavior.",
 ])
 def test_categories_and_open_questions_are_not_verdicts(text):
     assert verify.verdict_phrases(text) == []

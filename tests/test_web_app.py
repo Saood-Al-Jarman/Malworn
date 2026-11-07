@@ -66,7 +66,7 @@ def test_full_flow(client, app):
     status = wait_done(client, location)
     assert status["status"] == "done", status
     called = [e["tool"] for e in status["events"] if e["kind"] == "tool_call"]
-    assert called[:4] == ["hashes", "file_type", "packing_indicators", "virustotal"]  # core triage first
+    assert len(called) == 10 and called[0] == "hashes"   # a full analysis runs every tool first
 
     page = client.get(location).get_data(as_text=True)
     assert "<h3>Summary</h3>" in page
@@ -77,7 +77,7 @@ def test_full_flow(client, app):
     report = client.get(location + "/report.html")
     assert report.status_code == 200
     assert "default-src 'none'" in report.headers["Content-Security-Policy"]
-    assert client.get(location + "/report.json").get_json()["execution_summary"]["successful_calls"] == 3
+    assert client.get(location + "/report.json").get_json()["execution_summary"]["total_returned_calls"] == 10
 
     # the sample is stored by hash, read-only, not executable
     store = app.extensions["malworn"]["store"]
