@@ -17,7 +17,7 @@
 {% if meta.status in ("queued", "running") %}
 <section class="panel live" id="live">
   <h2>Working</h2>
-  <p class="muted" id="live-note">{% if meta.status == "queued" %}Waiting for the model (another analysis is running).{% else %}The model is choosing tools.{% endif %}</p>
+  <p class="muted" id="live-note">{% if meta.status == "queued" %}Waiting for the model (another analysis is running).{% else %}Running the static tools, then the model explains the results.{% endif %}</p>
   <ol class="steps" id="steps"></ol>
   <details open>
     <summary>Model reasoning</summary>

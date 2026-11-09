@@ -72,7 +72,7 @@
           forming.textContent = s.answer;
           pill.textContent = s.status;
           pill.className = "pill " + s.status;
-          if (s.status === "running") note.textContent = s.answer ? "The model is writing its explanation." : "The model is choosing tools.";
+          if (s.status === "running") note.textContent = s.answer ? "The model is writing its explanation." : "Running the static tools, then the model explains the results.";
           if (s.status === "done" || s.status === "error") { window.location.reload(); return; }
           setTimeout(poll, 1000);
         })
