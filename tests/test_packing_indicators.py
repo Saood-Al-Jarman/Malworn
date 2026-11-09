@@ -61,7 +61,8 @@ def upx_like():
                      ("UPX1", os.urandom(8000), 0x2000, CODE | W)], 0x9000)
 
 
-def test_clean_pe_is_not_flagged(write_pe):
+def test_clean_pe_is_not_flagged(write_pe, no_die):
+    # heuristics only: real DIE output on a synthetic PE differs between machines
     text = bytes(range(32)) * 100 + b"\x90" * 500
     r = pi.analyze(write_pe(build_pe([(".text", text, 0x1000, CODE),
                                       (".data", b"A" * 600, 0x1000, DATA)], 0x1000)))
@@ -191,7 +192,7 @@ def renamed_upx():
                      (".bb1", UPX_STUB + os.urandom(6000), 0x2000, CODE | W)], 0x9000)
 
 
-def test_known_packer_when_name_and_signature_agree(write_pe):
+def test_known_packer_when_name_and_signature_agree(write_pe, no_die):
     c = pi.analyze(write_pe(upx_with_real_stub()))["packer_classification"]
     assert c["status"] == "known_packer" and c["packer"] == "UPX"
 
