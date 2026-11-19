@@ -17,20 +17,22 @@ if ! nvidia-smi; then
   exit 1
 fi
 
-echo "== Python"
-python3 --version
+echo "== Python 3.12 environment (via uv, no sudo needed)"
 VENV="$HOME/malworn-ft"
-if [ ! -x "$VENV/bin/python" ]; then
-  if ! python3 -m venv "$VENV"; then
-    echo "FAIL: cannot create a virtual environment. Run: sudo apt update && sudo apt install -y python3-venv python3-pip"
-    exit 1
-  fi
+if ! command -v uv >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/uv" ]; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh || { echo "FAIL: could not install uv"; exit 1; }
+fi
+export PATH="$HOME/.local/bin:$PATH"
+if [ ! -x "$VENV/bin/python" ] || ! "$VENV/bin/python" -c "import sys; assert sys.version_info[:2] == (3, 12)" 2>/dev/null; then
+  rm -rf "$VENV"
+  uv venv --python 3.12 --seed "$VENV" || { echo "FAIL: uv could not create a Python 3.12 environment"; exit 1; }
 fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
+python --version
 
 echo "== Installing the training stack (first run only, several GB)"
-python -c "import unsloth" 2>/dev/null || pip install --upgrade pip unsloth || { echo "FAIL: pip install unsloth"; exit 1; }
+python -c "import unsloth" 2>/dev/null || uv pip install unsloth || { echo "FAIL: pip install unsloth"; exit 1; }
 
 echo "== Data"
 for f in data/finetune/train.jsonl data/finetune/val.jsonl; do
