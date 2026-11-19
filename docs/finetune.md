@@ -15,9 +15,9 @@ PYTHONPATH=src python3 -m malworn.finetune.build_dataset manifest.csv --out data
     --exclude-hashes test_hashes.txt
 ```
 
-- `test_hashes.txt`: one SHA-256 per line for every test file: every `test` row of the corpus,
-  `~/demo-files/launcher_upx.exe` (`sha256sum ~/demo-files/launcher_upx.exe`), and any malware
-  test samples. `launcher.exe` is refused automatically.
+- `test_hashes.txt`: one SHA-256 per line for every test file: every `test` row of the corpus
+  and any malware test samples. The demo files `launcher.exe` and `launcher_upx.exe` are refused
+  automatically.
 - Run it with the **real VirusTotal bridge** (`unset MALWORN_VT_MODE`), or every VirusTotal answer
   will teach "no live lookup was made (mock mode)". Only hashes leave the machine.
 - Files derived from real malware: build inside the VM; the output is sample-derived and stays

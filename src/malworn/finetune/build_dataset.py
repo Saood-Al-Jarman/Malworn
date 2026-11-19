@@ -58,11 +58,11 @@ from malworn.agent.tools import load_tools
 from malworn.contract import run_tool
 
 # --- test files that must never be trained on -----------------------------------
-# launcher.exe = setuptools 69.5.1 cli-32.exe, the O3/O4 demo file. Add the hash
-# of ~/demo-files/launcher_upx.exe (it depends on the UPX version) with
-# --exclude-hashes.
+# The O3/O4 demo files: launcher.exe (setuptools 69.5.1 cli-32.exe) and the VM's
+# launcher_upx.exe. Add every other test file with --exclude-hashes.
 BUILTIN_TEST_HASHES = {
     "32acc1bc543116cbe2cff10cb867772df2f254ff2634c870aef0b46c4b696fdb",  # launcher.exe
+    "4b9b95a04d6658ee015f9ddd3c959d27029dad6c61f89c13e737acea17221e69",  # launcher_upx.exe (VM copy)
 }
 SIMILARITY_LIMIT = 0.6   # word overlap with an O3 question at or above this = too close
 
