@@ -17,6 +17,12 @@ if ! nvidia-smi; then
   exit 1
 fi
 
+echo "== C compiler (needed by the GPU kernels)"
+if ! command -v gcc >/dev/null 2>&1; then
+  echo "FAIL: no C compiler. Run: sudo apt update && sudo apt install -y build-essential"
+  exit 1
+fi
+
 echo "== Python 3.12 environment (via uv, no sudo needed)"
 VENV="$HOME/malworn-ft"
 if ! command -v uv >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/uv" ]; then
