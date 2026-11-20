@@ -59,7 +59,7 @@ report the change.
 ## 5. Train
 
 ```bash
-python -m malworn.finetune.train_qlora data/finetune --out runs/qlora_v1 --gguf
+python -m malworn.finetune.train_qlora data/finetune --out runs/qlora_v1
 ```
 
 Defaults: rank 16, 2 epochs, learning rate 2e-4, effective batch 8. Watch `train_summary.json`:
@@ -68,14 +68,21 @@ loss rises, it is memorising: use 1 epoch or more data.
 
 ## 6. Load into Ollama
 
-Use the base model's template so tool calling works exactly as before:
+Convert the adapter (about 200 MB) and load it on top of the `qwen3:8b` Ollama already has, so
+the chat template and tool calling are unchanged. In WSL, with the training env active:
+
+```bash
+bash scripts/wsl_export_adapter.sh runs/qlora_v1
+```
+
+Then in PowerShell, in the repo folder:
 
 ```powershell
-ollama show qwen3:8b --modelfile > Modelfile
-# edit Modelfile: replace the FROM line with the GGUF path, e.g.
-# FROM C:\path\to\runs\qlora_v1\gguf\unsloth.Q4_K_M.gguf
-ollama create malworn-qwen3-8b-ft -f Modelfile
+ollama create malworn-qlora_v1 -f runs/qlora_v1/Modelfile
 ```
+
+(`--gguf` on the trainer writes a full merged model instead: 16 GB merged + 16 GB GGUF; the
+first trial run failed on a nearly full C: drive, so the adapter route is the default.)
 
 ## 7. Compare base vs tuned (TC11, O5)
 

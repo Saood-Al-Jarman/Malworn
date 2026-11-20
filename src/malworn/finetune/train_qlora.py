@@ -18,7 +18,9 @@ What it does:
   - trains ONLY on the assistant turns (tool calls and answers): the system
     prompt, question and tool results are context, not targets
   - evaluates on val.jsonl (other files than training) every epoch
-  - saves the adapter; with --gguf also a merged Q4_K_M GGUF for Ollama
+  - saves the adapter (~180 MB). For Ollama, convert it with
+    scripts/wsl_export_adapter.sh (a small GGUF adapter on top of qwen3:8b);
+    --gguf instead writes a full merged model (needs ~35 GB of free disk)
 
 Setup (WSL2 Ubuntu, NVIDIA driver on Windows): see docs/finetune.md.
 """
@@ -67,7 +69,9 @@ def main(argv=None):
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--rank", type=int, default=16)
     ap.add_argument("--grad-accum", type=int, default=8, help="examples per update (batch size is 1)")
-    ap.add_argument("--gguf", action="store_true", help="also export a merged Q4_K_M GGUF for Ollama")
+    ap.add_argument("--gguf", action="store_true",
+                    help="also export a merged Q4_K_M GGUF (needs ~35 GB free disk; usually use "
+                         "scripts/wsl_export_adapter.sh instead)")
     ap.add_argument("--seed", type=int, default=3407)
     args = ap.parse_args(argv)
 
@@ -111,7 +115,7 @@ def main(argv=None):
         learning_rate=args.lr, lr_scheduler_type="cosine", warmup_ratio=0.05,
         optim="adamw_8bit", weight_decay=0.01, logging_steps=1 if args.smoke else 5,
         eval_strategy="no" if args.smoke or not val_rows else "epoch",
-        save_strategy="no" if args.smoke else "epoch", seed=args.seed, report_to="none",
+        save_strategy="no", seed=args.seed, report_to="none",   # only the final adapter is kept
         bf16=torch.cuda.is_bf16_supported(), fp16=not torch.cuda.is_bf16_supported(),
     )
     trainer = SFTTrainer(model=model, tokenizer=tokenizer, args=config,
