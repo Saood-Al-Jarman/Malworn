@@ -68,21 +68,21 @@ loss rises, it is memorising: use 1 epoch or more data.
 
 ## 6. Load into Ollama
 
-Convert the adapter (about 200 MB) and load it on top of the `qwen3:8b` Ollama already has, so
-the chat template and tool calling are unchanged. In WSL, with the training env active:
+Ollama no longer accepts LoRA adapters, so the adapter is merged into the model and quantised to
+Q4_K_M (the same quantisation as `qwen3:8b`). In WSL, with the training env active (~20 min,
+~40 GB free needed while it runs):
 
 ```bash
-bash scripts/wsl_export_adapter.sh runs/qlora_v1
+python -m malworn.finetune.export_gguf runs/qlora_v1
 ```
 
-Then in PowerShell, in the repo folder:
+It prints the two PowerShell lines to run next; they reuse `qwen3:8b`'s own template so tool
+calling is unchanged:
 
 ```powershell
-ollama create malworn-qlora_v1 -f runs/qlora_v1/Modelfile
+(ollama show qwen3:8b --modelfile) -replace '^FROM .*', 'FROM C:\...\merged\....Q4_K_M.gguf' | Set-Content Modelfile.merged
+ollama create malworn-v1 -f Modelfile.merged
 ```
-
-(`--gguf` on the trainer writes a full merged model instead: 16 GB merged + 16 GB GGUF; the
-first trial run failed on a nearly full C: drive, so the adapter route is the default.)
 
 ## 7. Compare base vs tuned (TC11, O5)
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# NOTE: recent Ollama versions reject ADAPTER ("LoRA adapters are no longer supported");
+# use python -m malworn.finetune.export_gguf instead. Kept for llama.cpp users.
 # Turn a trained LoRA adapter into a small GGUF adapter that Ollama loads on top of
 # the qwen3:8b it already has (~200 MB instead of a 16 GB merged model + 16 GB GGUF).
 # Run INSIDE WSL2 Ubuntu, from the repo folder, with the training env active:

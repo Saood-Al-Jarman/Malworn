@@ -40,3 +40,4 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+unsloth_compiled_cache/
