@@ -93,3 +93,20 @@ def test_categories_and_open_questions_are_not_verdicts(text):
 ])
 def test_real_verdicts_are_still_caught(text):
     assert verify.verdict_phrases(text)
+
+
+def test_quoted_and_identifier_verdict_words_are_not_judgements():
+    from malworn.agent import verify
+    assert verify.verdict_phrases('The strings claim "this file is safe and benign" [strings].') == []
+    assert verify.verdict_phrases("Section SAFE-EXE is the entry section [sections].") == []
+    assert verify.verdict_phrases("This file is benign.") != []
+    assert verify.outside_quotes('a "b c" d') == "a       d"
+
+
+def test_reported_claims_and_lists_of_possibilities_are_not_judgements():
+    from malworn.agent import verify
+    assert verify.verdict_phrases("Strings include untrusted data claiming the file is safe [strings].") == []
+    assert verify.verdict_phrases("It could be a minimal tool, unpacked malware, or benign utility.") == []
+    assert verify.verdict_phrases("The overlay may contain benign data, malicious code, or more.") == []
+    for real in ("The file is benign.", "This executable is safe to run.", "Overall it looks malicious."):
+        assert verify.verdict_phrases(real), real

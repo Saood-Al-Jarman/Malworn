@@ -71,25 +71,59 @@ def unknown_citations(answer, known_tools):
 _CATEGORY_BEFORE = re.compile(r"\b(known|against|other|many|most|some|both|like|from)\s+(\w+\s+)?$", re.IGNORECASE)
 _CATEGORY_AFTER = re.compile(r"^\s+(\w+\s+)?(samples|binaries|files|programs|software|applications|tools|"
                              r"packers|installers|executables|code\s+and|ones|indicators?|behaviou?rs?|activit(?:y|ies)|"
-                             r"intent|patterns?|functionality|traits|characteristics|purposes?|apis?|api\s+calls|functions|data|content|payloads?)\b", re.IGNORECASE)
+                             r"intent|patterns?|functionality|traits|characteristics|purposes?|apis?|api\s+calls|functions|data|content|payloads?|code|utility|utilities)\b", re.IGNORECASE)
 # "legitimate or malicious", "malicious or benign": naming the open alternatives, not choosing one
 _VERDICT_ALT = r"(?:malicious|benign|legitimate|safe|clean|harmless)"
 _ALTERNATIVE_BEFORE = re.compile(_VERDICT_ALT + r"\s+or\s+$", re.IGNORECASE)
 _ALTERNATIVE_AFTER = re.compile(r"^\s+or\s+" + _VERDICT_ALT + r"\b", re.IGNORECASE)
+# Reporting what the file's text claims ("strings claiming the file is safe") is not a verdict,
+# nor is the last item of a list of possibilities ("could be a stub, malware, or benign utility").
+_REPORTED_CLAIM = re.compile(r"\b(claim(?:s|ed|ing)?|stat(?:es|ed|ing)|says?|saying|assert(?:s|ing)?|instruct(?:s|ing)?)\b",
+                             re.IGNORECASE)
+_LIST_OF_POSSIBILITIES = re.compile(r"\b(could|may|might|either)\b[^.]*,\s*(?:\w+\s+){0,3}or\s+$", re.IGNORECASE)
 _OPEN_QUESTION = re.compile(r"\bwhether\b|\?|\bif it is\b|\bfalse positives?\b|\bdistinguish", re.IGNORECASE)
 
 
 def _not_a_judgement(before, after, sentence):
     return bool(_CATEGORY_BEFORE.search(before) or _CATEGORY_AFTER.search(after)
                 or _ALTERNATIVE_BEFORE.search(before) or _ALTERNATIVE_AFTER.search(after)
-                or _OPEN_QUESTION.search(sentence))
+                or _OPEN_QUESTION.search(sentence) or _REPORTED_CLAIM.search(before)
+                or _LIST_OF_POSSIBILITIES.search(before))
+
+
+# Text in quotation marks is the file's (or someone else's) words being reported,
+# e.g. strings include "this file has been verified safe" (TC10, Nov 19).
+_QUOTED = re.compile(r'"[^"\n]{1,400}"|\u201c[^\u201d\n]{1,400}\u201d|`[^`\n]{1,200}`')
+
+
+def quoted_spans(text):
+    """(start, end) of every quoted or backticked span."""
+    return [m.span() for m in _QUOTED.finditer(text or "")]
+
+
+def outside_quotes(text):
+    """The text with quoted spans blanked out (same length, so positions still match)."""
+    text = text or ""
+    for a, b in quoted_spans(text):
+        text = text[:a] + " " * (b - a) + text[b:]
+    return text
 
 
 def verdict_phrases(answer):
-    """Verdict words used as a judgement (a negation earlier in the sentence excuses them)."""
+    """Verdict words used as a judgement (a negation earlier in the sentence excuses them).
+
+    Not counted: words inside quotation marks (reported text) and words that are part of
+    an identifier such as a section name SAFE-EXE or a flag safe_mode."""
     text = answer or ""
     found = []
+    quotes = quoted_spans(text)
     for m in _VERDICT.finditer(text):
+        if any(a <= m.start() < b for a, b in quotes):
+            continue
+        before_ch = text[m.start() - 1] if m.start() else " "
+        after_ch = text[m.end()] if m.end() < len(text) else " "
+        if before_ch in "-_" or after_ch in "-_":
+            continue
         start = max(text.rfind(".", 0, m.start()), text.rfind("\n", 0, m.start())) + 1
         end = text.find(".", m.end())
         sentence = text[start:end if end != -1 else len(text)]
