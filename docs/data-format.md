@@ -1,6 +1,6 @@
 # Malworn Data Format
 
-**Version:** 0.3.2 (draft, open for team review)
+**Version:** 0.3.3 (draft, open for team review)
 **Owner:** Saood
 **Code:** [`src/malworn/contract.py`](../src/malworn/contract.py) (what tools return) and Hassan's [`src/malworn/detection/malworn_aggregator.py`](../src/malworn/detection/malworn_aggregator.py) (the report). `tests/test_contract.py` checks this document against both, so if the doc and the code disagree, the tests fail.
 
@@ -198,6 +198,26 @@ The agent sends the model a shorter view of this result (see `MODEL_VIEWS` in `a
 | `final_assessment` | object or null | Same as in `packing_indicators`, when the PE checks ran |
 | `summary` | string | One line for the analyst |
 
+### `capa`: Saood, FR12, built
+
+Mandiant capa (static; the file is never run) finds capabilities in the code and maps them to MITRE ATT&CK. The tactic chain is computed in code from ATT&CK's Enterprise tactic order, not by the model.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `capa_version` | string | capa version that ran |
+| `capability_count` | int | Capabilities matched (library and internal helper rules excluded) |
+| `capabilities` | list | Up to 60: `name`, `namespace`, `matches` (how many places), `attack` (technique IDs) |
+| `attack_techniques` | list | One per technique: `id` (e.g. `T1055`), `tactic`, `technique`, `subtechnique`, `capabilities` behind it; in tactic order |
+| `tactic_chain` | list | The 14 Enterprise tactics in order, each `{tactic, observed, techniques}` |
+| `observed_tactics` | list | Tactics with at least one technique, in chain order |
+| `furthest_tactic` | string or null | The observed tactic latest in the chain |
+| `look_for_next` | list | Later tactics with no evidence in this file, each with what it would look like (`look_for`): a checklist from ATT&CK's order, not a prediction |
+| `packed_limitation` | bool | capa reports the file appears packed (capabilities incomplete until unpacked) |
+| `limitations` | list | Plain-language limits sent to the model with the result |
+| `summary` | string | One line |
+
+The model is sent everything except `tactic_chain` and `capability_count` (`observed_tactics` and `look_for_next` carry the same information). Settings: `MALWORN_CAPA`, `MALWORN_CAPA_RULES`, `MALWORN_CAPA_SIGS` (the pip version needs rules and signatures; the standalone binary on REMnux has them built in), `MALWORN_CAPA_TIMEOUT` (default 180 s).
+
 ### `virustotal`: Hassan (lookup) and Saood (bridge), FR3, built
 
 The VM has no internet, so the agent's `virustotal` tool (`agent/vt_tool.py`) hashes the sample in the VM and sends only the SHA-256 to a bridge on the Windows host (`agent/vt_bridge.py`), which runs Hassan's lookup (`detection/virustotal_tool.py`) with the API key that lives on Windows. See `docs/demo.md`.
@@ -334,6 +354,8 @@ There is deliberately **no verdict field** anywhere. `report_generator.py` rende
 The sample, the tools and the agent loop all run **inside the analysis VM**. The agent sends only text (tool descriptions, tool results, its own messages) to the model on the Windows host through Ollama's API on the host-only network. Reports leave the VM as `.json`/`.html`/`.pdf` files only, never samples.
 
 ## Changes
+
+**v0.3.3 (Nov 26):** new tool `capa` (FR12): capabilities mapped to MITRE ATT&CK, the tactic chain and what to look for next. Default agent prompt a5 (a4's stricter rule on file text plus capa guidance and a MITRE ATT&CK section in the answer).
 
 **v0.3.2 (Nov 3):** `virustotal` is built: Hassan's lookup behind a hash-only bridge on Windows; `sha256` added to its keys. Warnings may use a verdict word when it is negated ("not evidence that a file is safe"). The agent's `file` object also carries `filename` and `size_bytes`, the names the report generator reads.
 

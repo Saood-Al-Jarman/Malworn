@@ -162,6 +162,15 @@ QUESTION_TYPES = {
         "Calculate the imphash so I can find similar files.",
         "Is there an imphash I can search for?",
     ]},
+    "attack": {"tools": ["capa"], "pe_only": True, "phrasings": [
+        "Which MITRE ATT&CK techniques does this file's code map to?",
+        "Where on the ATT&CK tactic chain do this sample's capabilities sit?",
+        "What capabilities does capa find, and which tactics are they?",
+        "Map this binary to MITRE ATT&CK for me.",
+        "Which stage of an intrusion do these capabilities point to, and what should I hunt for next?",
+        "Give me the ATT&CK technique IDs for this executable.",
+        "What could this program do, in ATT&CK terms?",
+    ]},
     "triage": {"tools": ["file_type", "packing_indicators", "virustotal"], "pe_only": False, "phrasings": [
         "Quick first look: format, packing and VirusTotal status.",
         "Do a fast triage on this upload.",
@@ -345,6 +354,31 @@ def answer_part(tool, view, qtype):
             return (f"{d.get('detections')} of {d.get('engines_total')} VirusTotal engines flag this hash "
                     f"{c}.{note} That is VirusTotal's finding, not a conclusion from this analysis.")
         return f"VirusTotal has no record of this hash {c}.{note} That is not evidence either way."
+    if tool == "capa":
+        techs = d.get("attack_techniques") or []
+        text = f"capa found {d.get('capability_count')} capabilities in the code {c}."
+        if techs:
+            by_tactic = {}
+            for t in techs:
+                by_tactic.setdefault(t.get("tactic"), []).append(f"{t.get('id')} {t.get('technique')}")
+            chain = "; ".join(f"{tac} ({', '.join(ids)})" for tac, ids in by_tactic.items())
+            text += f" In ATT&CK chain order, the observed tactics are: {chain} {c}."
+            if d.get("furthest_tactic"):
+                text += f" The furthest along the chain is {d.get('furthest_tactic')} {c}."
+            text += " A capability in the code is not proof that it runs"
+            if any(t.get("id") == "T1129" for t in techs):
+                text += ", and T1129 (Shared Modules) appears in ordinary programs too"
+            text += "."
+            later = [x.get("tactic") for x in d.get("look_for_next") or []]
+            if later:
+                text += (f" Later tactics with no evidence in this file: {_join(later, 6)} {c}. One file is "
+                         "often one stage of an intrusion, so these are what to look for next in other "
+                         "files, network traffic and the host, not a prediction of what the attacker will do.")
+        else:
+            text += f" None of them map to an ATT&CK technique {c}."
+        if d.get("packed_limitation"):
+            text += f" capa reports the file appears packed, so this list is incomplete until it is unpacked {c}."
+        return text
     raise ValueError(f"no answer template for {tool}")
 
 
@@ -416,6 +450,17 @@ def build_example(path, qtype, phrasing, tools_by_name, definitions, system_prom
             "meta": {**record_meta, "type": qtype, "question": phrasing, "tools_called": called}}
 
 
+def _capa_works(by_name, files):
+    """True if the capa tool succeeds on the first PE file (it needs capa and its rules)."""
+    tool = by_name.get("capa")
+    if tool is None:
+        return False
+    for path in files:
+        if is_pe(path):
+            return run_tool(tool.spec, tool.run, str(path)).status == "success"
+    return False
+
+
 def is_pe(path):
     with open(path, "rb") as fh:
         return fh.read(2) == b"MZ"
@@ -443,7 +488,8 @@ def synthetic_files(directory):
     return notes, pes
 
 
-def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_file=None, val_share=0.1):
+def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_file=None, val_share=0.1,
+          prompt=DEFAULT_AGENT_PROMPT):
     random.seed(seed)
     types = {k: dict(v, phrasings=list(v["phrasings"])) for k, v in QUESTION_TYPES.items()}
     for qtype, extra in (extra_questions or {}).items():
@@ -458,11 +504,16 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
     tools, _ = load_tools()
     by_name = {t.name: t for t in tools}
     definitions = [t.ollama_definition() for t in tools]
-    system_prompt = AGENT_PROMPTS[DEFAULT_AGENT_PROMPT]
+    system_prompt = AGENT_PROMPTS[prompt]   # train with the prompt the app will use
     blocked = set(BUILTIN_TEST_HASHES) | {h.lower() for h in exclude_hashes}
 
     examples, refused = [], []
     seen_hashes = set()
+    capa_ok = _capa_works(by_name, files)
+    skip_types = set() if capa_ok else {"attack"}
+    if not capa_ok:
+        print("[malworn] warning: capa is not working here, so no ATT&CK examples are built "
+              "(install capa, or set MALWORN_CAPA_RULES / MALWORN_CAPA_SIGS)", file=sys.stderr)
     for path in files:
         digest = sha256_of(path)
         if digest in blocked:
@@ -473,7 +524,8 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
             continue
         seen_hashes.add(digest)
         pe = is_pe(path)
-        applicable = [q for q, v in QUESTION_TYPES.items() if pe or not v["pe_only"]]
+        applicable = [q for q, v in QUESTION_TYPES.items()
+                      if (pe or not v["pe_only"]) and q not in skip_types]
         if per_file:
             applicable = random.sample(applicable, min(per_file, len(applicable)))
         for qtype in applicable:
@@ -540,6 +592,8 @@ def main(argv=None):
     ap.add_argument("--exclude-hashes", help="text file of SHA-256s that must never be trained on (test files)")
     ap.add_argument("--per-file", type=int, help="question types per file (default: all that apply)")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--prompt", default=DEFAULT_AGENT_PROMPT, choices=list(AGENT_PROMPTS),
+                    help="system prompt in the examples; must match the one the app uses (default %(default)s)")
     args = ap.parse_args(argv)
     if bool(args.manifest) == bool(args.files):
         ap.error("give a manifest or --files, not both")
@@ -555,7 +609,8 @@ def main(argv=None):
         ap.error("no such file: " + ", ".join(missing))
     excl = Path(args.exclude_hashes).read_text().split() if args.exclude_hashes else []
     extra = json.loads(Path(args.questions).read_text()) if args.questions else None
-    out = build(files, args.out, seed=args.seed, extra_questions=extra, exclude_hashes=excl, per_file=args.per_file)
+    out = build(files, args.out, seed=args.seed, extra_questions=extra, exclude_hashes=excl, per_file=args.per_file,
+                prompt=args.prompt)
     print((Path(args.out) / "stats.md").read_text())
     print(f"Wrote {out['train']} train and {out['val']} validation examples to {args.out}", file=sys.stderr)
     return 0

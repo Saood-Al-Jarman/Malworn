@@ -29,7 +29,9 @@ def build(corpus, tmp_path, **kw):
 def test_every_example_is_well_formed_and_passes_the_check(corpus, tmp_path):
     _, rows, out = build(corpus, tmp_path)
     types = {r["meta"]["type"] for r in rows}
-    assert set(bd.QUESTION_TYPES) | {"injection"} <= types
+    expected = set(bd.QUESTION_TYPES) - ({"attack"} if not bd._capa_works(
+        {t.name: t for t in bd.load_tools()[0]}, corpus) else set())
+    assert expected | {"injection"} <= types
     for r in rows:
         msgs = r["messages"]
         assert msgs[0]["role"] == "system" and msgs[1]["role"] == "user"

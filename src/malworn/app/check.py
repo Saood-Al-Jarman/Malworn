@@ -91,6 +91,14 @@ def check_data(path):
     return True, f"data folder {root} is writable"
 
 
+def check_capa():
+    path = os.environ.get("MALWORN_CAPA") or shutil.which("capa")
+    if not path:
+        return False, ("capa not found. The ATT&CK tool will report 'not installed'. On REMnux it should be "
+                       "installed; check  which capa  (pip version: also set MALWORN_CAPA_RULES and MALWORN_CAPA_SIGS)")
+    return True, f"capa found at {path}"
+
+
 def main():
     url = os.environ.get("MALWORN_OLLAMA_URL", DEFAULT_OLLAMA_URL)
     model = os.environ.get("MALWORN_MODEL", DEFAULT_MODEL)
@@ -98,6 +106,7 @@ def main():
         ("Model", lambda: check_ollama(url, model)),
         ("VirusTotal", lambda: check_bridge(os.environ.get("MALWORN_VT_BRIDGE", DEFAULT_BRIDGE))),
         ("Detect It Easy", check_diec),
+        ("capa (ATT&CK)", check_capa),
         ("Libraries", check_flask),
         ("Tools", check_tools),
         ("Data", lambda: check_data(os.environ.get("MALWORN_DATA", "~/malworn-data"))),

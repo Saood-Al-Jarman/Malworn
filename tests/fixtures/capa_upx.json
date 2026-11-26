@@ -1,0 +1,1170 @@
+{
+ "meta": {
+  "version": "10.0.0"
+ },
+ "rules": {
+  "link function at runtime on Windows": {
+   "meta": {
+    "namespace": "linking/runtime-linking",
+    "lib": false,
+    "attack": [
+     {
+      "parts": [
+       "Execution",
+       "Shared Modules"
+      ],
+      "tactic": "Execution",
+      "technique": "Shared Modules",
+      "subtechnique": "",
+      "id": "T1129"
+     }
+    ]
+   },
+   "matches": [
+    [
+     {
+      "type": "absolute",
+      "value": 5368752733
+     },
+     {
+      "success": true,
+      "node": {
+       "type": "statement",
+       "statement": {
+        "type": "and"
+       }
+      },
+      "children": [
+       {
+        "success": true,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "os",
+          "os": "windows"
+         }
+        },
+        "children": [],
+        "locations": [
+         {
+          "type": "no address"
+         }
+        ],
+        "captures": {}
+       },
+       {
+        "success": true,
+        "node": {
+         "type": "statement",
+         "statement": {
+          "type": "or"
+         }
+        },
+        "children": [
+         {
+          "success": true,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "api",
+            "api": "GetProcAddress"
+           }
+          },
+          "children": [],
+          "locations": [
+           {
+            "type": "absolute",
+            "value": 5368752733
+           }
+          ],
+          "captures": {}
+         },
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "api",
+            "api": "LdrGetProcedureAddress"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         },
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "api",
+            "api": "LdrGetProcedureAddressEx"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         },
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "api",
+            "api": "LdrGetProcedureAddressForCaller"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         },
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "api",
+            "api": "MmGetSystemRoutineAddress"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         }
+        ],
+        "locations": [],
+        "captures": {}
+       }
+      ],
+      "locations": [],
+      "captures": {}
+     }
+    ]
+   ]
+  },
+  "change memory protection": {
+   "meta": {
+    "namespace": null,
+    "lib": true,
+    "attack": []
+   },
+   "matches": [
+    [
+     {
+      "type": "absolute",
+      "value": 5368752817
+     },
+     {
+      "success": true,
+      "node": {
+       "type": "statement",
+       "statement": {
+        "type": "or"
+       }
+      },
+      "children": [
+       {
+        "success": true,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "VirtualProtect"
+         }
+        },
+        "children": [],
+        "locations": [
+         {
+          "type": "absolute",
+          "value": 5368752856
+         },
+         {
+          "type": "absolute",
+          "value": 5368752886
+         }
+        ],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "VirtualProtectEx"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "NtProtectVirtualMemory"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "ZwProtectVirtualMemory"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "match",
+          "match": "change memory protection/31541a5f650840dbb996522562c68bba"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       }
+      ],
+      "locations": [],
+      "captures": {}
+     }
+    ]
+   ]
+  },
+  "allocate or change RW memory": {
+   "meta": {
+    "namespace": null,
+    "lib": true,
+    "attack": []
+   },
+   "matches": [
+    [
+     {
+      "type": "absolute",
+      "value": 5368752817
+     },
+     {
+      "success": true,
+      "node": {
+       "type": "statement",
+       "statement": {
+        "type": "and"
+       }
+      },
+      "children": [
+       {
+        "success": true,
+        "node": {
+         "type": "statement",
+         "statement": {
+          "type": "or"
+         }
+        },
+        "children": [
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "match",
+            "match": "allocate memory"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         },
+         {
+          "success": true,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "match",
+            "match": "change memory protection"
+           }
+          },
+          "children": [
+           {
+            "success": true,
+            "node": {
+             "type": "statement",
+             "statement": {
+              "type": "or"
+             }
+            },
+            "children": [
+             {
+              "success": true,
+              "node": {
+               "type": "feature",
+               "feature": {
+                "type": "api",
+                "api": "VirtualProtect"
+               }
+              },
+              "children": [],
+              "locations": [
+               {
+                "type": "absolute",
+                "value": 5368752856
+               },
+               {
+                "type": "absolute",
+                "value": 5368752886
+               }
+              ],
+              "captures": {}
+             },
+             {
+              "success": false,
+              "node": {
+               "type": "feature",
+               "feature": {
+                "type": "api",
+                "api": "VirtualProtectEx"
+               }
+              },
+              "children": [],
+              "locations": [],
+              "captures": {}
+             },
+             {
+              "success": false,
+              "node": {
+               "type": "feature",
+               "feature": {
+                "type": "api",
+                "api": "NtProtectVirtualMemory"
+               }
+              },
+              "children": [],
+              "locations": [],
+              "captures": {}
+             },
+             {
+              "success": false,
+              "node": {
+               "type": "feature",
+               "feature": {
+                "type": "api",
+                "api": "ZwProtectVirtualMemory"
+               }
+              },
+              "children": [],
+              "locations": [],
+              "captures": {}
+             },
+             {
+              "success": false,
+              "node": {
+               "type": "feature",
+               "feature": {
+                "type": "match",
+                "match": "change memory protection/31541a5f650840dbb996522562c68bba"
+               }
+              },
+              "children": [],
+              "locations": [],
+              "captures": {}
+             }
+            ],
+            "locations": [],
+            "captures": {}
+           }
+          ],
+          "locations": [
+           {
+            "type": "absolute",
+            "value": 5368752817
+           }
+          ],
+          "captures": {}
+         }
+        ],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": true,
+        "node": {
+         "type": "statement",
+         "statement": {
+          "type": "or"
+         }
+        },
+        "children": [
+         {
+          "success": true,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "number",
+            "number": 4,
+            "description": "PAGE_READWRITE"
+           }
+          },
+          "children": [],
+          "locations": [
+           {
+            "type": "absolute",
+            "value": 5368752840
+           }
+          ],
+          "captures": {}
+         },
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "match",
+            "match": "allocate or change RW memory/a364d144af7b4205acfca85a8dcadeb4"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         }
+        ],
+        "locations": [],
+        "captures": {}
+       }
+      ],
+      "locations": [],
+      "captures": {}
+     }
+    ]
+   ]
+  },
+  "contain loop": {
+   "meta": {
+    "namespace": null,
+    "lib": true,
+    "attack": []
+   },
+   "matches": [
+    [
+     {
+      "type": "absolute",
+      "value": 5368752386
+     },
+     {
+      "success": true,
+      "node": {
+       "type": "statement",
+       "statement": {
+        "type": "or"
+       }
+      },
+      "children": [
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "characteristic",
+          "characteristic": "loop"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": true,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "characteristic",
+          "characteristic": "tight loop"
+         }
+        },
+        "children": [],
+        "locations": [
+         {
+          "type": "absolute",
+          "value": 5368752430
+         },
+         {
+          "type": "absolute",
+          "value": 5368752406
+         }
+        ],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "characteristic",
+          "characteristic": "recursive call"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       }
+      ],
+      "locations": [],
+      "captures": {}
+     }
+    ]
+   ]
+  },
+  "terminate process": {
+   "meta": {
+    "namespace": "host-interaction/process/terminate",
+    "lib": false,
+    "attack": []
+   },
+   "matches": [
+    [
+     {
+      "type": "absolute",
+      "value": 5368752448
+     },
+     {
+      "success": true,
+      "node": {
+       "type": "statement",
+       "statement": {
+        "type": "or"
+       }
+      },
+      "children": [
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "System.Diagnostics.Process::Kill"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "System.Diagnostics.Process::WaitForExit"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "System.Diagnostics.Process::WaitForExitAsync"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "System.Environment::Exit"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "System.Windows.Forms.Application::Exit"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "exit"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "Exit"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "api",
+          "api": "RmShutdown"
+         }
+        },
+        "children": [],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": false,
+        "node": {
+         "type": "statement",
+         "statement": {
+          "type": "and"
+         }
+        },
+        "children": [
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "os",
+            "os": "linux"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         },
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "api",
+            "api": "exit_group"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         }
+        ],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": true,
+        "node": {
+         "type": "statement",
+         "statement": {
+          "type": "and"
+         }
+        },
+        "children": [
+         {
+          "success": true,
+          "node": {
+           "type": "statement",
+           "statement": {
+            "type": "optional"
+           }
+          },
+          "children": [
+           {
+            "success": false,
+            "node": {
+             "type": "feature",
+             "feature": {
+              "type": "match",
+              "match": "open process"
+             }
+            },
+            "children": [],
+            "locations": [],
+            "captures": {}
+           }
+          ],
+          "locations": [],
+          "captures": {}
+         },
+         {
+          "success": true,
+          "node": {
+           "type": "statement",
+           "statement": {
+            "type": "or"
+           }
+          },
+          "children": [
+           {
+            "success": false,
+            "node": {
+             "type": "feature",
+             "feature": {
+              "type": "api",
+              "api": "TerminateProcess"
+             }
+            },
+            "children": [],
+            "locations": [],
+            "captures": {}
+           },
+           {
+            "success": false,
+            "node": {
+             "type": "feature",
+             "feature": {
+              "type": "api",
+              "api": "NtTerminateProcess"
+             }
+            },
+            "children": [],
+            "locations": [],
+            "captures": {}
+           },
+           {
+            "success": true,
+            "node": {
+             "type": "feature",
+             "feature": {
+              "type": "api",
+              "api": "ExitProcess"
+             }
+            },
+            "children": [],
+            "locations": [
+             {
+              "type": "absolute",
+              "value": 5368752753
+             }
+            ],
+            "captures": {}
+           },
+           {
+            "success": false,
+            "node": {
+             "type": "feature",
+             "feature": {
+              "type": "api",
+              "api": "ZwTerminateProcess"
+             }
+            },
+            "children": [],
+            "locations": [],
+            "captures": {}
+           }
+          ],
+          "locations": [],
+          "captures": {}
+         }
+        ],
+        "locations": [],
+        "captures": {}
+       }
+      ],
+      "locations": [],
+      "captures": {}
+     }
+    ]
+   ]
+  },
+  "packed with UPX": {
+   "meta": {
+    "namespace": "anti-analysis/packer/upx",
+    "lib": false,
+    "attack": [
+     {
+      "parts": [
+       "Defense Evasion",
+       "Obfuscated Files or Information",
+       "Software Packing"
+      ],
+      "tactic": "Defense Evasion",
+      "technique": "Obfuscated Files or Information",
+      "subtechnique": "Software Packing",
+      "id": "T1027.002"
+     }
+    ]
+   },
+   "matches": [
+    [
+     {
+      "type": "no address"
+     },
+     {
+      "success": true,
+      "node": {
+       "type": "statement",
+       "statement": {
+        "type": "or"
+       }
+      },
+      "children": [
+       {
+        "success": false,
+        "node": {
+         "type": "statement",
+         "statement": {
+          "type": "and"
+         }
+        },
+        "children": [
+         {
+          "success": false,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "format",
+            "format": "elf"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         },
+         {
+          "success": true,
+          "node": {
+           "type": "statement",
+           "statement": {
+            "type": "or"
+           }
+          },
+          "children": [
+           {
+            "success": true,
+            "node": {
+             "type": "feature",
+             "feature": {
+              "type": "string",
+              "string": "UPX!"
+             }
+            },
+            "children": [],
+            "locations": [
+             {
+              "type": "file",
+              "value": 992
+             }
+            ],
+            "captures": {}
+           }
+          ],
+          "locations": [],
+          "captures": {}
+         }
+        ],
+        "locations": [],
+        "captures": {}
+       },
+       {
+        "success": true,
+        "node": {
+         "type": "statement",
+         "statement": {
+          "type": "and"
+         }
+        },
+        "children": [
+         {
+          "success": true,
+          "node": {
+           "type": "feature",
+           "feature": {
+            "type": "format",
+            "format": "pe"
+           }
+          },
+          "children": [],
+          "locations": [],
+          "captures": {}
+         },
+         {
+          "success": true,
+          "node": {
+           "type": "statement",
+           "statement": {
+            "type": "or"
+           }
+          },
+          "children": [
+           {
+            "success": true,
+            "node": {
+             "type": "feature",
+             "feature": {
+              "type": "section",
+              "section": "UPX0"
+             }
+            },
+            "children": [],
+            "locations": [
+             {
+              "type": "absolute",
+              "value": 5368713216
+             }
+            ],
+            "captures": {}
+           },
+           {
+            "success": true,
+            "node": {
+             "type": "feature",
+             "feature": {
+              "type": "section",
+              "section": "UPX1"
+             }
+            },
+            "children": [],
+            "locations": [
+             {
+              "type": "absolute",
+              "value": 5368745984
+             }
+            ],
+            "captures": {}
+           }
+          ],
+          "locations": [],
+          "captures": {}
+         }
+        ],
+        "locations": [],
+        "captures": {}
+       }
+      ],
+      "locations": [],
+      "captures": {}
+     }
+    ]
+   ]
+  },
+  "(internal) packer file limitation": {
+   "meta": {
+    "namespace": "internal/limitation/static",
+    "lib": false,
+    "attack": []
+   },
+   "matches": [
+    [
+     {
+      "type": "no address"
+     },
+     {
+      "success": true,
+      "node": {
+       "type": "statement",
+       "statement": {
+        "type": "or"
+       }
+      },
+      "children": [
+       {
+        "success": true,
+        "node": {
+         "type": "feature",
+         "feature": {
+          "type": "match",
+          "match": "anti-analysis/packer"
+         }
+        },
+        "children": [
+         {
+          "success": true,
+          "node": {
+           "type": "statement",
+           "statement": {
+            "type": "or"
+           }
+          },
+          "children": [
+           {
+            "success": false,
+            "node": {
+             "type": "statement",
+             "statement": {
+              "type": "and"
+             }
+            },
+            "children": [
+             {
+              "success": false,
+              "node": {
+               "type": "feature",
+               "feature": {
+                "type": "format",
+                "format": "elf"
+               }
+              },
+              "children": [],
+              "locations": [],
+              "captures": {}
+             },
+             {
+              "success": true,
+              "node": {
+               "type": "statement",
+               "statement": {
+                "type": "or"
+               }
+              },
+              "children": [
+               {
+                "success": true,
+                "node": {
+                 "type": "feature",
+                 "feature": {
+                  "type": "string",
+                  "string": "UPX!"
+                 }
+                },
+                "children": [],
+                "locations": [
+                 {
+                  "type": "file",
+                  "value": 992
+                 }
+                ],
+                "captures": {}
+               }
+              ],
+              "locations": [],
+              "captures": {}
+             }
+            ],
+            "locations": [],
+            "captures": {}
+           },
+           {
+            "success": true,
+            "node": {
+             "type": "statement",
+             "statement": {
+              "type": "and"
+             }
+            },
+            "children": [
+             {
+              "success": true,
+              "node": {
+               "type": "feature",
+               "feature": {
+                "type": "format",
+                "format": "pe"
+               }
+              },
+              "children": [],
+              "locations": [],
+              "captures": {}
+             },
+             {
+              "success": true,
+              "node": {
+               "type": "statement",
+               "statement": {
+                "type": "or"
+               }
+              },
+              "children": [
+               {
+                "success": true,
+                "node": {
+                 "type": "feature",
+                 "feature": {
+                  "type": "section",
+                  "section": "UPX0"
+                 }
+                },
+                "children": [],
+                "locations": [
+                 {
+                  "type": "absolute",
+                  "value": 5368713216
+                 }
+                ],
+                "captures": {}
+               },
+               {
+                "success": true,
+                "node": {
+                 "type": "feature",
+                 "feature": {
+                  "type": "section",
+                  "section": "UPX1"
+                 }
+                },
+                "children": [],
+                "locations": [
+                 {
+                  "type": "absolute",
+                  "value": 5368745984
+                 }
+                ],
+                "captures": {}
+               }
+              ],
+              "locations": [],
+              "captures": {}
+             }
+            ],
+            "locations": [],
+            "captures": {}
+           }
+          ],
+          "locations": [],
+          "captures": {}
+         }
+        ],
+        "locations": [
+         {
+          "type": "no address"
+         }
+        ],
+        "captures": {}
+       }
+      ],
+      "locations": [],
+      "captures": {}
+     }
+    ]
+   ]
+  }
+ }
+}

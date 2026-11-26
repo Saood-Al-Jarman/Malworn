@@ -9,13 +9,13 @@ import types
 import pytest
 
 from malworn.agent import loop, tools as agent_tools
-from malworn.agent.prompts import AGENT_A3_SYSTEM
+from malworn.agent.prompts import AGENT_PROMPTS, DEFAULT_AGENT_PROMPT
 from malworn.contract import ToolSpec
 
 from tests.conftest import DONE, FakeOllama
 
 
-ALL_TOOLS = ["hashes", "file_type", "packing_indicators", "packer_signatures", "sections", "imports", "strings", "extra_checks", "version_info", "virustotal"]
+ALL_TOOLS = ["hashes", "file_type", "packing_indicators", "packer_signatures", "sections", "imports", "strings", "extra_checks", "version_info", "capa", "virustotal"]
 
 
 def call(*names):
@@ -71,7 +71,7 @@ def test_what_the_model_is_sent(fake_ollama, sample):
     run(sample, fake_ollama)
     first, second = FakeOllama.received
 
-    assert first["messages"][0] == {"role": "system", "content": AGENT_A3_SYSTEM}
+    assert first["messages"][0] == {"role": "system", "content": AGENT_PROMPTS[DEFAULT_AGENT_PROMPT]}
     assert '"file_name": "invoice.exe"' in first["messages"][1]["content"]
     assert [t["function"]["name"] for t in first["tools"]] == ALL_TOOLS
     assert first["tools"][0]["function"]["parameters"] == {"type": "object", "properties": {}, "required": []}
@@ -249,12 +249,16 @@ def test_every_real_tool_runs_on_a_packed_file(fake_ollama, packed_sample):
 
     by_tool = {r["tool"]: r for r in outcome["agent_run"]["tool_results"]}
     assert set(by_tool) == set(ALL_TOOLS)
+    # capa needs its rule set; on a machine without it (pip install, no MALWORN_CAPA_RULES) it fails cleanly
+    capa = by_tool.get("capa", {})
+    if capa.get("status") == "failure" and ("rule" in capa["error"] or "not installed" in capa["error"]):
+        by_tool.pop("capa")
     assert all(r["status"] == "success" for r in by_tool.values()), \
         {t: r["error"] for t, r in by_tool.items() if r["status"] != "success"}
     packing = by_tool["packing_indicators"]["data"]
     assert packing["needs_unpacking"] is True
     assert packing["packing_level"] == "likely"
-    assert outcome["report"]["execution_summary"]["failed_call_count"] == 0
+    assert outcome["report"]["execution_summary"]["failed_call_count"] == (0 if "capa" in by_tool else 1)
 
     # every result the model saw fits the size limit
     tool_messages = [m for m in FakeOllama.received[1]["messages"] if m["role"] == "tool"]

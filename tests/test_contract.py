@@ -10,6 +10,7 @@ import pytest
 from malworn import contract
 from malworn.contract import ToolResult, ToolSpec
 from malworn.detection.malworn_aggregator import aggregate_agent_run, aggregate_results
+from malworn.attack import capa_tool
 from malworn.packing import packer_signatures, packing_indicators
 from malworn.static_analysis import extra_checks, file_type, hashes, imports, sections, strings, version_info
 
@@ -191,7 +192,7 @@ def test_validate_checks_status_error_and_keys():
 TOOLS = {"hashes": hashes, "file_type": file_type, "sections": sections,
          "imports": imports, "strings": strings, "extra_checks": extra_checks,
          "version_info": version_info, "packing_indicators": packing_indicators,
-         "packer_signatures": packer_signatures}
+         "packer_signatures": packer_signatures, "capa": capa_tool}
 
 
 @pytest.fixture
@@ -284,7 +285,7 @@ def test_run_tool_results_are_accepted_by_the_aggregator(not_a_pe):
 def test_doc_catalogue_lists_every_tool():
     assert set(doc_specs()) == {"hashes", "file_type", "sections", "imports", "strings",
                                 "extra_checks", "version_info", "packing_indicators",
-                                "packer_signatures", "virustotal"}
+                                "packer_signatures", "capa", "virustotal"}
 
 
 def test_doc_example_results_follow_the_contract():

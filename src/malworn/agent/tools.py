@@ -24,6 +24,7 @@ TOOL_MODULES = [
     "malworn.static_analysis.strings",
     "malworn.static_analysis.extra_checks",
     "malworn.static_analysis.version_info",
+    "malworn.attack.capa_tool",             # capabilities -> MITRE ATT&CK (capa)
     "malworn.agent.vt_tool",                # VirusTotal via the Windows bridge (lookup by Hassan)
 ]
 
@@ -107,6 +108,10 @@ FALLBACK_SPECS = {
 # thresholds, weak evidence and entropy regions add length without changing
 # what the model should say.
 MODEL_VIEWS = {
+    # capa: the full 14-step tactic_chain is for the report; observed_tactics and
+    # look_for_next carry the same information in a fraction of the length.
+    "capa": ("summary", "observed_tactics", "furthest_tactic", "look_for_next", "attack_techniques",
+             "capabilities", "packed_limitation", "limitations"),
     "packing_indicators": ("summary", "packing_level", "score", "needs_unpacking",
                            "static_evidence_reliability", "packer_classification", "per_section",
                            "evidence_for", "counter_evidence", "checks_run"),

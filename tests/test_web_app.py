@@ -66,7 +66,7 @@ def test_full_flow(client, app):
     status = wait_done(client, location)
     assert status["status"] == "done", status
     called = [e["tool"] for e in status["events"] if e["kind"] == "tool_call"]
-    assert len(called) == 10 and called[0] == "hashes"   # a full analysis runs every tool first
+    assert len(called) == 11 and called[0] == "hashes"   # a full analysis runs every tool first
 
     page = client.get(location).get_data(as_text=True)
     assert "<h3>Summary</h3>" in page
@@ -77,7 +77,7 @@ def test_full_flow(client, app):
     report = client.get(location + "/report.html")
     assert report.status_code == 200
     assert "default-src 'none'" in report.headers["Content-Security-Policy"]
-    assert client.get(location + "/report.json").get_json()["execution_summary"]["total_returned_calls"] == 10
+    assert client.get(location + "/report.json").get_json()["execution_summary"]["total_returned_calls"] == 11
 
     # the sample is stored by hash, read-only, not executable
     store = app.extensions["malworn"]["store"]
@@ -144,7 +144,7 @@ def test_preflight_check_reports_each_problem(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[FAIL] Model" in out and "OLLAMA_HOST" in out
     assert "[  ok] VirusTotal" in out          # mock mode in tests
-    assert "[  ok] Tools" in out and "10 tools" in out
+    assert "[  ok] Tools" in out and "11 tools" in out
 
 
 def test_preflight_check_passes_when_everything_is_up(fake_ollama, tmp_path, monkeypatch, capsys):
