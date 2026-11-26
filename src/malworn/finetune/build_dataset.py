@@ -389,6 +389,27 @@ NEXT_STEPS = {
 }
 
 
+# Every answer ends with Next steps that are the ANALYST's actions outside Malworn. The trial
+# model (Nov 20) wrote "Run `virustotal` ..." in 7 of 12 answers because most template answers
+# had no Next steps to learn from; these never name a Malworn tool that wasn't called.
+ANALYST_STEPS = {
+    "packed": "Treat the imports and strings with caution until you know whether the file is packed.",
+    "packer_name": "Check the packer's version against its official release before unpacking.",
+    "imports": "Look up any function you don't recognise in Microsoft's documentation and note those the "
+               "program's stated purpose doesn't explain.",
+    "virustotal": "Open the full report on the VirusTotal website for engine names, first-seen date and "
+                  "related samples.",
+    "signed": "Confirm the publisher on the vendor's own website before trusting the version fields.",
+    "iocs": "Check any domains, IPs or paths against your threat-intelligence sources and proxy logs.",
+    "overlay": "Carve the overlay out with a hex editor and identify its format.",
+    "hashes": "Record the hashes in the ticket.",
+    "file_type": "Keep the file in the analysis VM regardless of its type.",
+    "sections": "Compare the section names and sizes with a known-good build of the same program, if you have one.",
+    "imphash": "",
+    "attack": "Check the host and network for the later-stage activity listed above.",
+}
+
+
 def build_answer(qtype, views):
     """The final answer for a question type, from the model views of the tools called."""
     parts = [answer_part(tool, views[tool], qtype) for tool in QUESTION_TYPES[qtype]["tools"]]
@@ -404,6 +425,8 @@ def build_answer(qtype, views):
         steps.append(NEXT_STEPS["imphash"])
     if qtype in ("triage", "verdict", "hashes"):
         steps.append(NEXT_STEPS["hash"])
+    if ANALYST_STEPS.get(qtype):
+        steps.append(ANALYST_STEPS[qtype])
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
     return text

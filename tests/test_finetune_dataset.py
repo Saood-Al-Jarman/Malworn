@@ -88,3 +88,16 @@ def test_manifest_uses_only_train_rows(corpus, tmp_path):
     used = {json.loads(l)["meta"]["file"] for n in ("train", "val")
             for l in (tmp_path / "o" / f"{n}.jsonl").read_text().splitlines()}
     assert "f1.exe" not in used and "f0.exe" in used
+
+
+def test_next_steps_never_name_a_tool_that_was_not_called(corpus, tmp_path):
+    _, rows, _ = build(corpus, tmp_path)
+    tool_names = [t["function"]["name"] for t in rows[0]["tools"]]
+    for r in rows:
+        answer = r["messages"][-1]["content"]
+        if r["meta"]["type"] in bd.QUESTION_TYPES and bd.ANALYST_STEPS.get(r["meta"]["type"]):
+            assert "Next steps:" in answer, r["meta"]
+        if "Next steps:" in answer:
+            steps = answer.split("Next steps:")[1]
+            named = verify.tools_mentioned(steps, tool_names)
+            assert set(named) <= set(r["meta"]["tools_called"]), (named, r["meta"]["type"], steps)
