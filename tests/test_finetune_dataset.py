@@ -109,3 +109,13 @@ def test_exclude_hash_file_ignores_names_and_comments(corpus, tmp_path):
     out = tmp_path / "o"
     assert bd.main(["--files", *map(str, corpus), "--out", str(out), "--exclude-hashes", str(lst)]) == 0
     assert "test file" in (out / "stats.md").read_text()
+
+
+def test_hard_cut_results_are_skipped_not_crashed(corpus, tmp_path, monkeypatch):
+    real = bd.result_for_model
+    monkeypatch.setattr(bd, "result_for_model",
+                        lambda r, keys=None: real(r, keys)[:50] + " ... [result cut: too long]"
+                        if r.tool == "strings" else real(r, keys))
+    result, rows, out = build(corpus, tmp_path)
+    assert result["skipped"] and all(q in ("iocs", "injection") for _, q, _ in result["skipped"])
+    assert "Examples skipped" in (out / "stats.md").read_text()

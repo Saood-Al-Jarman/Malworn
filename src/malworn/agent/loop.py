@@ -85,7 +85,7 @@ CUTOFF_NUDGE = ("Your reasoning was cut off before you answered. Do not reason a
 # goes into the report). Strings from a real sample can number in the tens of
 # thousands; the model only needs a sample of them. Lists are only shortened
 # when the result doesn't fit: the longest cap that fits is used.
-LIST_CAPS = (None, 200, 100, 60, 30, 15)
+LIST_CAPS = (None, 200, 100, 60, 30, 15, 8, 4)   # 8 and 4 added Nov 26: big DLLs overflowed at 15
 MAX_TEXT_CHARS = 300
 MAX_RESULT_CHARS = 6000
 

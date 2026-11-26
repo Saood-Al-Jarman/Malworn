@@ -448,6 +448,10 @@ def _reasoning(qtype, tools, called):
     return "I have the results I need; I answer from them, citing each tool, with no verdict."
 
 
+class SkipExample(Exception):
+    """An example that can't be built reliably (e.g. a tool result the model would only see cut)."""
+
+
 def build_example(path, qtype, phrasing, tools_by_name, definitions, system_prompt, meta, original_name=None):
     info = file_info(path, original_name)
     messages = [{"role": "system", "content": system_prompt},
@@ -460,7 +464,11 @@ def build_example(path, qtype, phrasing, tools_by_name, definitions, system_prom
         messages.append({"role": "assistant", "content": "", "reasoning_content": _reasoning(qtype, [tool], called),
                          "tool_calls": [{"type": "function", "function": {"name": tool, "arguments": {}}}]})
         messages.append({"role": "tool", "name": tool, "content": content})
-        views[tool] = json.loads(content.split(" ... [result cut")[0]) if content.startswith("{") else {}
+        try:
+            views[tool] = json.loads(content)
+        except json.JSONDecodeError:
+            # the model would see a hard-cut, partial result: no reliable answer can be written from it
+            raise SkipExample(f"{tool} result too long for the model even when shortened")
         called.append(tool)
     answer = meta["answer_fn"](views) if "answer_fn" in meta else build_answer(qtype, views)
     problems = verify.check_answer(answer, called, list(tools_by_name))
@@ -530,7 +538,7 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
     system_prompt = AGENT_PROMPTS[prompt]   # train with the prompt the app will use
     blocked = set(BUILTIN_TEST_HASHES) | {h.lower() for h in exclude_hashes}
 
-    examples, refused = [], []
+    examples, refused, skipped = [], [], []
     seen_hashes = set()
     capa_ok = _capa_works(by_name, files)
     skip_types = set() if capa_ok else {"attack"}
@@ -556,17 +564,26 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
             applicable = must + random.sample(rest, max(0, min(per_file - len(must), len(rest))))
         for qtype in applicable:
             phrasing = random.choice(QUESTION_TYPES[qtype]["phrasings"])
-            examples.append(build_example(path, qtype, phrasing, by_name, definitions, system_prompt,
-                                          {"file": Path(path).name, "sha256": digest, "source": "corpus"}))
+            try:
+                examples.append(build_example(path, qtype, phrasing, by_name, definitions, system_prompt,
+                                              {"file": Path(path).name, "sha256": digest, "source": "corpus"}))
+            except SkipExample as exc:
+                skipped.append((Path(path).name, qtype, str(exc)))
+
+    def _add(fn, args):
+        try:
+            examples.append(fn(*args))
+        except SkipExample as exc:
+            skipped.append((Path(args[0]).name, args[1], str(exc)))
 
     with tempfile.TemporaryDirectory() as tmp:
         notes, injected = synthetic_files(tmp)
         for qtype in ("packed", "imports", "sections"):    # tools that fail or skip on a non-PE file
-            examples.append(build_example(notes, qtype, random.choice(QUESTION_TYPES[qtype]["phrasings"]),
+            _add(build_example, (notes, qtype, random.choice(QUESTION_TYPES[qtype]["phrasings"]),
                                           by_name, definitions, system_prompt,
                                           {"file": "notes.txt", "sha256": sha256_of(notes), "source": "synthetic"}))
         for path, payload in injected:
-            examples.append(build_example(
+            _add(build_example, (
                 path, "injection", random.choice(QUESTION_TYPES["iocs"]["phrasings"]), by_name, definitions,
                 system_prompt, {"file": path.name, "sha256": sha256_of(path), "source": "synthetic",
                                 "tools": ["strings"],
@@ -586,11 +603,12 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
         with open(out_dir / f"{name}.jsonl", "w", encoding="utf-8") as fh:
             for r in rows:
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
-    write_stats(out_dir / "stats.md", train, val, refused, rejected)
-    return {"train": len(train), "val": len(val), "refused": refused, "rejected_phrasings": rejected}
+    write_stats(out_dir / "stats.md", train, val, refused, rejected, skipped)
+    return {"train": len(train), "val": len(val), "refused": refused, "rejected_phrasings": rejected,
+            "skipped": skipped}
 
 
-def write_stats(path, train, val, refused, rejected):
+def write_stats(path, train, val, refused, rejected, skipped=()):
     rows = train + val
     sizes = [len(json.dumps(r["messages"])) for r in rows]
     lines = ["# Fine-tuning dataset", "",
@@ -603,6 +621,8 @@ def write_stats(path, train, val, refused, rejected):
         lines.append(f"| {qtype} | {n} |")
     if refused:
         lines += ["", "## Files refused", ""] + [f"- {p}: {why}" for p, why in refused]
+    if skipped:
+        lines += ["", f"## Examples skipped ({len(skipped)})", ""] + [f"- {f} / {q}: {why}" for f, q, why in skipped]
     if rejected:
         lines += ["", "## Phrasings dropped (too close to an O3 test question)", ""] + [f"- {p}" for p in rejected]
     lines += ["", "Read a sample of the examples before training (e.g. `head -c 3000 train.jsonl`)."]
