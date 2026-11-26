@@ -119,3 +119,21 @@ def test_hard_cut_results_are_skipped_not_crashed(corpus, tmp_path, monkeypatch)
     result, rows, out = build(corpus, tmp_path)
     assert result["skipped"] and all(q in ("iocs", "injection") for _, q, _ in result["skipped"])
     assert "Examples skipped" in (out / "stats.md").read_text()
+
+
+def test_capa_answer_uses_count_the_model_sees():
+    """capability_count is hidden from the model; the answer must take the count from the summary."""
+    from malworn.finetune.build_dataset import answer_part, build_answer
+    view = {"status": "success", "data": {
+        "summary": "3 capabilities; none map to an ATT&CK technique.",
+        "capabilities": [{"name": "access .NET resource"}, {"name": "manipulate console buffer"},
+                         {"name": "compiled to the .NET platform"}],
+        "attack_techniques": [], "look_for_next": []}}
+    text = answer_part("capa", view, "attack")
+    assert "None" not in text.replace("None of them", "")
+    assert "3 capabilities" in text and "access .NET resource" in text
+    full = build_answer("attack", {"capa": view})
+    assert "listed above" not in full          # nothing is listed when no tactics were observed
+    empty = {"status": "success", "data": {"summary": "0 capabilities.", "capabilities": [],
+                                            "attack_techniques": [], "look_for_next": []}}
+    assert "no capabilities" in answer_part("capa", empty, "attack")

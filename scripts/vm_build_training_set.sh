@@ -16,6 +16,7 @@ if [ "${MALWORN_VT_MODE:-}" = "mock" ]; then
 fi
 command -v upx >/dev/null || { echo "FAIL: upx not found"; exit 1; }
 command -v capa >/dev/null || [ -n "${MALWORN_CAPA:-}" ] || { echo "FAIL: capa not found"; exit 1; }
+export MALWORN_CAPA_TIMEOUT="${MALWORN_CAPA_TIMEOUT:-400}"   # big DLLs need more than the 180 s default
 CHECK=$(PYTHONPATH=src python3 -m malworn.app.check 2>&1 || true)
 echo "$CHECK"
 for need in "VirusTotal" "Detect It Easy" "capa"; do

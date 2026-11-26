@@ -356,7 +356,16 @@ def answer_part(tool, view, qtype):
         return f"VirusTotal has no record of this hash {c}.{note} That is not evidence either way."
     if tool == "capa":
         techs = d.get("attack_techniques") or []
-        text = f"capa found {d.get('capability_count')} capabilities in the code {c}."
+        caps = d.get("capabilities") or []
+        # capability_count is not in the model's view; use the number in the summary it does see
+        m = re.match(r"\s*(\d+) capabilit", d.get("summary") or "")
+        count = int(m.group(1)) if m else len(caps)
+        if count == 0:
+            text = f"capa found no capabilities in the code {c}."
+        else:
+            names = [x.get("name") for x in caps if x.get("name")]
+            text = (f"capa found {count} {'capability' if count == 1 else 'capabilities'} in the code, "
+                    f"including: {_join(names, 5)} {c}.")
         if techs:
             by_tactic = {}
             for t in techs:
@@ -374,8 +383,8 @@ def answer_part(tool, view, qtype):
                 text += (f" Later tactics with no evidence in this file: {_join(later, 6)} {c}. One file is "
                          "often one stage of an intrusion, so these are what to look for next in other "
                          "files, network traffic and the host, not a prediction of what the attacker will do.")
-        else:
-            text += f" None of them map to an ATT&CK technique {c}."
+        elif count:
+            text += f" None of them map to an ATT&CK technique, so capa places nothing on the tactic chain {c}."
         if d.get("packed_limitation"):
             text += f" capa reports the file appears packed, so this list is incomplete until it is unpacked {c}."
         return text
@@ -407,6 +416,8 @@ ANALYST_STEPS = {
     "sections": "Compare the section names and sizes with a known-good build of the same program, if you have one.",
     "imphash": "",
     "attack": "Check the host and network for the later-stage activity listed above.",
+    "attack_none": "If this file came with others from the same incident, upload them too: other files "
+                   "may show other stages.",
 }
 
 
@@ -425,7 +436,13 @@ def build_answer(qtype, views):
         steps.append(NEXT_STEPS["imphash"])
     if qtype in ("triage", "verdict", "hashes"):
         steps.append(NEXT_STEPS["hash"])
-    if ANALYST_STEPS.get(qtype):
+    if qtype == "attack":
+        capa = views.get("capa", {})
+        if capa.get("status") == "success" and (capa.get("data") or {}).get("look_for_next"):
+            steps.append(ANALYST_STEPS["attack"])
+        else:
+            steps.append(ANALYST_STEPS["attack_none"])
+    elif ANALYST_STEPS.get(qtype):
         steps.append(ANALYST_STEPS[qtype])
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
