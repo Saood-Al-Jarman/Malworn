@@ -39,9 +39,22 @@ for f in "$WORK"/*.exe; do
   [ $n -ge 14 ] && break
   base=$(basename "$f" .exe)
   case $((n % 3)) in 0) opt="" ;; 1) opt="--best" ;; 2) opt="--lzma" ;; esac
-  if upx -q $opt -o "$WORK/packed/${base}_upx.exe" "$f" >/dev/null 2>&1; then n=$((n+1)); fi
+  out="$WORK/packed/${base}_upx.exe"
+  # Windows programs are built with Control Flow Guard, which UPX refuses without --force.
+  # Fine here: the packed copies are only analysed, never run.
+  if upx -q $opt -o "$out" "$f" >/dev/null 2>"$WORK/upx_err.txt" \
+     || { rm -f "$out"; upx -q --force $opt -o "$out" "$f" >/dev/null 2>>"$WORK/upx_err.txt"; }; then
+    n=$((n+1))
+  else
+    rm -f "$out"
+    echo "  upx could not pack $(basename "$f"): $(tail -1 "$WORK/upx_err.txt" | cut -c1-120)"
+  fi
 done
 echo "Made $n UPX copies"
+if [ "$n" -lt 5 ]; then
+  echo "FAIL: fewer than 5 packed copies; the training set needs packed examples (see the upx messages above)"
+  exit 1
+fi
 
 MANIFEST="$WORK/manifest.csv"
 echo "path,split" > "$MANIFEST"
