@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Malworn fine-tuning: build the training set INSIDE the REMnux VM, so the examples come from
 # exactly the tools the app runs (DIE, capa, the VirusTotal bridge).
-#     bash scripts/vm_build_training_set.sh ~/malworn-train.zip
+#     bash scripts/vm_build_training_set.sh ~/malworn-train.zip     (or the unzipped malworn-train folder)
 # Unzips the benign training files, adds UPX-packed copies of up to 14 of the .exe files, writes
 # a manifest (all "train"), and runs the dataset builder with the default prompt, real
 # VirusTotal lookups (hash only) and the test-hash exclusion list. Output: data/finetune/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-ZIP="${1:?usage: bash scripts/vm_build_training_set.sh <path to malworn-train.zip>}"
+SRC="${1:?usage: bash scripts/vm_build_training_set.sh <malworn-train.zip or the malworn-train folder>}"
 WORK="$HOME/malworn-train"
 PER_FILE="${PER_FILE:-5}"
 
@@ -16,10 +16,24 @@ if [ "${MALWORN_VT_MODE:-}" = "mock" ]; then
 fi
 command -v upx >/dev/null || { echo "FAIL: upx not found"; exit 1; }
 command -v capa >/dev/null || [ -n "${MALWORN_CAPA:-}" ] || { echo "FAIL: capa not found"; exit 1; }
-PYTHONPATH=src python3 -m malworn.app.check || echo "(Model may show FAIL: the build does not need Ollama. VirusTotal, Detect It Easy and capa must be ok.)"
+CHECK=$(PYTHONPATH=src python3 -m malworn.app.check 2>&1 || true)
+echo "$CHECK"
+for need in "VirusTotal" "Detect It Easy" "capa"; do
+  if echo "$CHECK" | grep -q "\[FAIL\] $need"; then
+    echo "FAIL: $need must be ok for the training set (the Model line doesn't matter here)."
+    [ "$need" = "VirusTotal" ] && echo "      On Windows start the bridge:  cd \$HOME\\Malworn; \$env:PYTHONPATH=\"src\"; python -m malworn.agent.vt_bridge"
+    exit 1
+  fi
+done
 
 rm -rf "$WORK" && mkdir -p "$WORK/packed"
-unzip -q "$ZIP" -d "$WORK"
+if [ -d "$SRC" ]; then
+  cp "$SRC"/* "$WORK"/
+elif [ -f "$SRC" ]; then
+  unzip -q "$SRC" -d "$WORK"
+else
+  echo "FAIL: $SRC is neither a folder nor a zip file"; exit 1
+fi
 n=0
 for f in "$WORK"/*.exe; do
   [ $n -ge 14 ] && break
