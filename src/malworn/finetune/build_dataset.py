@@ -550,7 +550,10 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
         applicable = [q for q, v in QUESTION_TYPES.items()
                       if (pe or not v["pe_only"]) and q not in skip_types]
         if per_file:
-            applicable = random.sample(applicable, min(per_file, len(applicable)))
+            # ATT&CK (capa) is the newest behaviour, so every PE gets one; the rest are sampled
+            must = [q for q in ("attack",) if q in applicable]
+            rest = [q for q in applicable if q not in must]
+            applicable = must + random.sample(rest, max(0, min(per_file - len(must), len(rest))))
         for qtype in applicable:
             phrasing = random.choice(QUESTION_TYPES[qtype]["phrasings"])
             examples.append(build_example(path, qtype, phrasing, by_name, definitions, system_prompt,
@@ -630,7 +633,9 @@ def main(argv=None):
     missing = [str(f) for f in files if not Path(f).is_file()]
     if missing:
         ap.error("no such file: " + ", ".join(missing))
-    excl = Path(args.exclude_hashes).read_text().split() if args.exclude_hashes else []
+    # one SHA-256 per line; anything after it on the line, and # comment lines, are ignored
+    excl = re.findall(r"(?m)^\s*([0-9a-fA-F]{64})\b", Path(args.exclude_hashes).read_text()) \
+        if args.exclude_hashes else []
     extra = json.loads(Path(args.questions).read_text()) if args.questions else None
     out = build(files, args.out, seed=args.seed, extra_questions=extra, exclude_hashes=excl, per_file=args.per_file,
                 prompt=args.prompt)

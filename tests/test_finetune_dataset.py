@@ -101,3 +101,11 @@ def test_next_steps_never_name_a_tool_that_was_not_called(corpus, tmp_path):
             steps = answer.split("Next steps:")[1]
             named = verify.tools_mentioned(steps, tool_names)
             assert set(named) <= set(r["meta"]["tools_called"]), (named, r["meta"]["type"], steps)
+
+
+def test_exclude_hash_file_ignores_names_and_comments(corpus, tmp_path):
+    lst = tmp_path / "test_hashes.txt"
+    lst.write_text("# comment line\n" + bd.sha256_of(corpus[0]) + "  B001 calc.exe\n")
+    out = tmp_path / "o"
+    assert bd.main(["--files", *map(str, corpus), "--out", str(out), "--exclude-hashes", str(lst)]) == 0
+    assert "test file" in (out / "stats.md").read_text()

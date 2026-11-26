@@ -12,6 +12,7 @@ malware/
 
 # === Data and models (too big for GitHub) ===
 data/*
+!data/test_hashes.txt
 !data/README.md
 *.pt
 *.pth
