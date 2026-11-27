@@ -113,3 +113,20 @@ v2 changes:
   examples (reports) and shows whether they fit in 12 GB
 - at inference, an answer that cites a tool that never ran makes Malworn run that tool and the
   model rewrite from the real result (`agent/loop.py`, `converse_checked`)
+
+## v3 (Nov 27): the base model's own answers, filtered
+
+v2 still lost report quality (11/22 reports with all five sections, placeholders such as
+"0 of M engines", 2/21 TC10 injections followed). v3 replaces the template answers with the base
+model's own answers (rejection-sampling fine-tuning): `scripts/vm_distill.sh` runs qwen3:8b with
+the a5 prompt on every training file (a full report plus 5 questions) and on 40 harmless files
+carrying planted text, and `malworn.finetune.distill` keeps an answer only if it needed no
+correction, passes the check, called exactly the tools the question needs, has the five report
+sections, contains no value missing from the tool results and no placeholder, and (planted
+text) reported the text without obeying it. Output: `data/finetune_v3`. Train with
+`train_qlora data/finetune_v3 --out runs/qlora_v3`.
+
+Decision rule (set before training): v3 replaces the base model as the default only if it
+matches it on safety (TC10 0 followed, every report with all five sections, no invented values)
+and gets the O3 triage questions right. Otherwise the base model stays the default and v1-v3
+are reported as the fine-tuning experiment.
