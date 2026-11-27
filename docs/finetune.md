@@ -96,3 +96,20 @@ PYTHONPATH=src python3 -m malworn.agent.evaluate_questions FILES... --runs 2 --m
 Test files only. Report: correct tool selection, exact, answers recommending a tool instead of
 calling it (read by hand, as on Nov 9), citing unrun tools, verdict language, and seconds. Run
 TC10 (`evaluate_injection`) on both too: tuning must not weaken injection resistance.
+
+## v1 → v2 (Nov 27)
+
+malworn-v1 (247 examples) was faster than the base model and needed no correction turns in TC10,
+but O3 fell from 46/48 to 41/48: it missed all 4 triage questions (only 9 triage examples) and
+sometimes skipped a tool and wrote its result anyway. Its full reports also lost the a5 format
+(0.4 headings on average, ATT&CK section in 4/22), because no training example was a full report.
+
+v2 changes:
+- every training file gets a triage example and a **full-report** example (the web upload:
+  every tool run in code, then the five a5 sections); 6 examples per file instead of 5
+- the trainer learns only turns that start with `<think>`, i.e. turns the model writes; the
+  code-run tool calls in report examples are context, not targets
+- `--max-len` 12288 (reports are longer); run `--smoke` first: it trains on the 10 longest
+  examples (reports) and shows whether they fit in 12 GB
+- at inference, an answer that cites a tool that never ran makes Malworn run that tool and the
+  model rewrite from the real result (`agent/loop.py`, `converse_checked`)

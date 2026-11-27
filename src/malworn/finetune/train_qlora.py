@@ -64,7 +64,8 @@ def main(argv=None):
     ap.add_argument("--out", default="runs/qlora")
     ap.add_argument("--smoke", action="store_true", help="10 longest examples, 10 steps: memory and speed check")
     ap.add_argument("--base", default=BASE_MODEL)
-    ap.add_argument("--max-len", type=int, default=8192, help="max tokens per example (default %(default)s)")
+    ap.add_argument("--max-len", type=int, default=12288,
+                    help="max tokens per example (default %(default)s; 8192 for v1, before full-report examples)")
     ap.add_argument("--epochs", type=float, default=2)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--rank", type=int, default=16)
@@ -121,11 +122,25 @@ def main(argv=None):
     trainer = SFTTrainer(model=model, tokenizer=tokenizer, args=config,
                          train_dataset=Dataset.from_list(train_rows),
                          eval_dataset=Dataset.from_list(val_rows) if val_rows else None)
-    # Learn only the assistant turns. Qwen wraps tool results in user turns, so
-    # they are masked too.
+    # Learn only the turns the model writes. Qwen wraps tool results in user turns, so they are
+    # masked too. Every turn the model writes has reasoning, which Qwen renders as <think>; the
+    # tool calls Malworn runs in code (full-report examples) have none, so they are not targets
+    # and the model doesn't learn to call every tool at once. (v1 used "<|im_start|>assistant\n".)
     trainer = train_on_responses_only(trainer, instruction_part="<|im_start|>user\n",
-                                      response_part="<|im_start|>assistant\n")
+                                      response_part="<|im_start|>assistant\n<think>")
 
+    try:   # the trainable tokens must not be empty (a wrong response_part would mask everything)
+        rows = trainer.train_dataset.select(range(min(8, len(trainer.train_dataset))))
+        trainable = sum(sum(1 for x in row["labels"] if x != -100) for row in rows)
+        total_tok = sum(len(row["labels"]) for row in rows)
+        print(f"[malworn] trainable tokens in the first {len(rows)} rows: {trainable} of {total_tok}",
+              file=sys.stderr)
+        if trainable == 0:
+            print("error: no trainable tokens: the response markers don't match the chat template",
+                  file=sys.stderr)
+            return 2
+    except (KeyError, TypeError):
+        pass
     torch.cuda.reset_peak_memory_stats()
     started = time.monotonic()
     stats = trainer.train()

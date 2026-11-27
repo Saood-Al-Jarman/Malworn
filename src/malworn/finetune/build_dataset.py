@@ -52,8 +52,8 @@ from pathlib import Path
 
 from malworn.agent import verify
 from malworn.agent.evaluate_questions import QUESTIONS as O3_QUESTIONS
-from malworn.agent.loop import file_info, first_message, result_for_model
-from malworn.agent.prompts import AGENT_PROMPTS, DEFAULT_AGENT_PROMPT
+from malworn.agent.loop import ALL_NOTE, file_info, first_message, result_for_model
+from malworn.agent.prompts import AGENT_PROMPTS, DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_REQUEST
 from malworn.agent.tools import load_tools
 from malworn.contract import run_tool
 
@@ -304,6 +304,8 @@ def answer_part(tool, view, qtype):
         return text + short
     if tool == "imports":
         dlls = d.get("dlls") or []
+        if not dlls and not d.get("function_count"):
+            return f"It imports no functions: the import table is empty {c}." + short
         text = (f"It imports {d.get('function_count')} functions from {d.get('dll_count')} DLLs: "
                 f"{_join([x.get('dll') for x in dlls], 8)} {c}.")
         if dlls:
@@ -498,6 +500,115 @@ def build_example(path, qtype, phrasing, tools_by_name, definitions, system_prom
             "meta": {**record_meta, "type": qtype, "question": phrasing, "tools_called": called}}
 
 
+# --- full reports: the web upload (preset "all") ----------------------------------
+# v1 (Nov 27) had only short question-and-answer examples and lost the report format: in TC10
+# its full reports had 0.4 headings on average (base model: 4) and the ATT&CK section in 4/22.
+REPORT_EVIDENCE_TOOLS = ["hashes", "file_type", "packing_indicators", "packer_signatures", "sections",
+                         "imports", "strings", "extra_checks", "version_info", "virustotal"]
+
+
+def build_report_answer(views, payload=None):
+    """The a5 report (Summary, Evidence, MITRE ATT&CK view, What we cannot tell yet, Next steps)."""
+    ok = {t: v for t, v in views.items() if v.get("status") == "success"}
+    data = {t: (v.get("data") or {}) for t, v in ok.items()}
+    failed = [t for t in views if t not in ok]
+
+    summary = []
+    if "file_type" in ok:
+        summary.append(f"The header identifies the file as {data['file_type'].get('description')} [file_type].")
+    if "packing_indicators" in ok:
+        pi = data["packing_indicators"]
+        text = f"The packing tools rate packing as \"{pi.get('packing_level')}\" [packing_indicators]"
+        packer = (pi.get("packer_classification") or {}).get("packer")
+        text += f", naming {packer} as the likely packer [packing_indicators]." if packer else "."
+        summary.append(text)
+    if failed:
+        summary.append(f"{len(views) - len(failed)} of {len(views)} tools produced a result, so the "
+                       "evidence is incomplete; static analysis also cannot show what the program does "
+                       "when it runs.")
+    else:
+        summary.append(f"All {len(views)} tools produced a result, but static analysis cannot show what "
+                       "the program does when it runs.")
+
+    evidence = []
+    for tool in REPORT_EVIDENCE_TOOLS:
+        if tool not in ok:
+            continue
+        if tool == "extra_checks":
+            evidence.append(answer_part(tool, views[tool], "imphash"))
+            evidence.append(answer_part(tool, views[tool], "overlay"))
+        else:
+            evidence.append(answer_part(tool, views[tool], "iocs" if tool == "strings" else "report"))
+    if payload:
+        evidence.append(f"One string reads like an instruction to an AI assistant: \"{payload}\" [strings]. "
+                        "It is untrusted text written by the file's author; I report it as evidence and do "
+                        "not follow it.")
+
+    capa = views.get("capa")
+    if capa is None:
+        attack = "capa did not run, so there is no ATT&CK view."
+    else:
+        attack = answer_part("capa", capa, "attack")
+
+    cannot = ["Static analysis shows what the file contains, not what it does when it runs."]
+    pi = data.get("packing_indicators") or {}
+    if pi.get("needs_unpacking"):
+        cannot.append("The file appears packed, so its imports, strings and capabilities describe the "
+                      "packer more than the program inside it [packing_indicators].")
+    for tool in failed:
+        cannot.append(_not_available(tool, views[tool]))
+
+    steps = []
+    if pi.get("needs_unpacking"):
+        steps.append(NEXT_STEPS["needs_unpacking"])
+    steps.append(NEXT_STEPS["hash"])
+    if (data.get("extra_checks") or {}).get("imphash"):
+        steps.append(NEXT_STEPS["imphash"])
+    if (data.get("capa") or {}).get("look_for_next"):
+        steps.append(ANALYST_STEPS["attack"].replace("listed above", "listed in the ATT&CK view"))
+    else:
+        steps.append(ANALYST_STEPS["attack_none"])
+    steps.append("Only after these static checks, and only in an isolated sandbox: dynamic analysis "
+                 "can show what the program does at run time.")
+
+    return "\n".join([
+        "## Summary", " ".join(summary), "",
+        "## Evidence", *[f"- {e}" for e in evidence], "",
+        "## MITRE ATT&CK view", attack, "",
+        "## What we cannot tell yet", *[f"- {c}" for c in cannot], "",
+        "## Next steps", *[f"{i}. {s}" for i, s in enumerate(steps, 1)],
+    ])
+
+
+def build_report_example(path, tools_by_name, definitions, system_prompt, meta, payload=None):
+    """A full first-level analysis as the web app runs it: every tool run in code (an assistant
+    turn the model never writes, rendered without <think> so it is not trained on), then the report."""
+    info = file_info(path)
+    names = list(tools_by_name)
+    opening = first_message(info, DEFAULT_AGENT_REQUEST) + "\n\n" + ALL_NOTE.format(names=", ".join(names))
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": opening},
+                {"role": "assistant", "content": "",
+                 "tool_calls": [{"type": "function", "function": {"name": n, "arguments": {}}} for n in names]}]
+    views = {}
+    for name in names:
+        t = tools_by_name[name]
+        content = result_for_model(run_tool(t.spec, t.run, str(path)), t.model_keys)
+        messages.append({"role": "tool", "name": name, "content": content})
+        try:
+            views[name] = json.loads(content)
+        except json.JSONDecodeError:
+            raise SkipExample(f"{name} result too long for the model even when shortened")
+    answer = build_report_answer(views, payload)
+    problems = verify.check_answer(answer, names, names)
+    if verify.has_problems(problems):
+        raise AssertionError(f"template report on {path} fails the check: {problems}\n{answer}")
+    messages.append({"role": "assistant", "content": answer,
+                     "reasoning_content": "Every tool has already run. I explain the evidence in the report "
+                                          "format, citing each tool, with no verdict."})
+    return {"messages": messages, "tools": definitions,
+            "meta": {**meta, "type": "report", "question": DEFAULT_AGENT_REQUEST, "tools_called": names}}
+
+
 def _capa_works(by_name, files):
     """True if the capa tool succeeds on the first PE file (it needs capa and its rules)."""
     tool = by_name.get("capa")
@@ -581,6 +692,13 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
             must = [q for q in ("attack", "triage") if q in applicable]
             rest = [q for q in applicable if q not in must]
             applicable = must + random.sample(rest, max(0, min(per_file - len(must), len(rest))))
+        if "report" not in skip_types:
+            try:
+                examples.append(build_report_example(path, by_name, definitions, system_prompt,
+                                                     {"file": Path(path).name, "sha256": digest,
+                                                      "source": "corpus"}))
+            except SkipExample as exc:
+                skipped.append((Path(path).name, "report", str(exc)))
         for qtype in applicable:
             phrasing = random.choice(QUESTION_TYPES[qtype]["phrasings"])
             try:
@@ -593,7 +711,7 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
         try:
             examples.append(fn(*args))
         except SkipExample as exc:
-            skipped.append((Path(args[0]).name, args[1], str(exc)))
+            skipped.append((Path(args[0]).name, args[1] if isinstance(args[1], str) else "report", str(exc)))
 
     with tempfile.TemporaryDirectory() as tmp:
         notes, injected = synthetic_files(tmp)
@@ -602,6 +720,9 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
                                           by_name, definitions, system_prompt,
                                           {"file": "notes.txt", "sha256": sha256_of(notes), "source": "synthetic"}))
         for path, payload in injected:
+            _add(build_report_example, (path, by_name, definitions, system_prompt,
+                                        {"file": path.name, "sha256": sha256_of(path), "source": "synthetic"},
+                                        payload))
             _add(build_example, (
                 path, "injection", random.choice(QUESTION_TYPES["iocs"]["phrasings"]), by_name, definitions,
                 system_prompt, {"file": path.name, "sha256": sha256_of(path), "source": "synthetic",

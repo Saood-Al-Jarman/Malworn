@@ -31,11 +31,11 @@ def test_every_example_is_well_formed_and_passes_the_check(corpus, tmp_path):
     types = {r["meta"]["type"] for r in rows}
     expected = set(bd.QUESTION_TYPES) - ({"attack"} if not bd._capa_works(
         {t.name: t for t in bd.load_tools()[0]}, corpus) else set())
-    assert expected | {"injection"} <= types
+    assert expected | {"injection", "report"} <= types
     for r in rows:
         msgs = r["messages"]
         assert msgs[0]["role"] == "system" and msgs[1]["role"] == "user"
-        calls = [m["tool_calls"][0]["function"]["name"] for m in msgs if m.get("tool_calls")]
+        calls = [c["function"]["name"] for m in msgs if m.get("tool_calls") for c in m["tool_calls"]]
         tool_msgs = [m["name"] for m in msgs if m["role"] == "tool"]
         assert calls == tool_msgs == r["meta"]["tools_called"]          # every call gets its result
         assert msgs[-1]["role"] == "assistant" and "tool_calls" not in msgs[-1]
@@ -117,7 +117,7 @@ def test_hard_cut_results_are_skipped_not_crashed(corpus, tmp_path, monkeypatch)
                         lambda r, keys=None: real(r, keys)[:50] + " ... [result cut: too long]"
                         if r.tool == "strings" else real(r, keys))
     result, rows, out = build(corpus, tmp_path)
-    assert result["skipped"] and all(q in ("iocs", "injection") for _, q, _ in result["skipped"])
+    assert result["skipped"] and all(q in ("iocs", "injection", "report") for _, q, _ in result["skipped"])
     assert "Examples skipped" in (out / "stats.md").read_text()
 
 
@@ -145,3 +145,20 @@ def test_every_corpus_file_gets_a_triage_example_when_sampling(corpus, tmp_path)
     corpus_files = {r["meta"]["file"] for r in rows if r["meta"]["source"] == "corpus"}
     triaged = {r["meta"]["file"] for r in rows if r["meta"]["source"] == "corpus" and r["meta"]["type"] == "triage"}
     assert corpus_files and triaged == corpus_files
+
+
+def test_report_examples_have_the_a5_sections_and_untrained_tool_turn(corpus, tmp_path):
+    """The full-report examples: every tool run in code, then the five a5 sections. The code-run
+    turn has no reasoning_content, so Qwen renders it without <think> and it is not a target."""
+    _, rows, _ = build(corpus, tmp_path)
+    reports = [r for r in rows if r["meta"]["type"] == "report"]
+    assert {r["meta"]["file"] for r in reports} >= {r["meta"]["file"] for r in rows if r["meta"]["source"] == "corpus"}
+    for r in reports:
+        code_turn = r["messages"][2]
+        assert code_turn["role"] == "assistant" and len(code_turn["tool_calls"]) == len(r["tools"])
+        assert not code_turn.get("reasoning_content")
+        answer = r["messages"][-1]["content"]
+        heads = [l for l in answer.splitlines() if l.startswith("## ")]
+        assert heads == ["## Summary", "## Evidence", "## MITRE ATT&CK view", "## What we cannot tell yet",
+                         "## Next steps"]
+    assert any("instruction to an AI assistant" in r["messages"][-1]["content"] for r in reports)
