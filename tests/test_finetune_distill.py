@@ -89,3 +89,15 @@ def test_an_answer_corrected_once_for_naming_unrun_tools_is_kept_as_corrected():
     assert not any("checked" in m["content"] for m in o["messages"] if m["role"] == "user")
     o2 = outcome(GOOD, sel, res, {"cutoffs": 1})
     assert "cut off" in d.judge(TRIAGE, o2, SYSTEM)
+
+
+def test_next_steps_naming_unrun_tools_are_dropped_not_the_answer():
+    sel, res = ["file_type", "packing_indicators", "virustotal"], [FT, PI, VT]
+    answer = GOOD + "\n\nNext steps:\n1. Review the imports [imports].\n2. Search the SHA-256 in your sources."
+    o = outcome(answer, sel, res)
+    assert d.judge(TRIAGE, o, SYSTEM) is None
+    assert o["explanation"].endswith("Next steps:\n1. Search the SHA-256 in your sources.")
+    only = GOOD + "\n\nNext steps:\n1. Run capa."
+    assert d.clean_next_steps(only, sel, TOOLS) == GOOD
+    claim = "The imports include CreateRemoteThread [imports]. " + GOOD
+    assert "fails the check" in d.judge(TRIAGE, outcome(claim, sel, res), SYSTEM)

@@ -157,29 +157,70 @@ def required_groups(qtype):
     return groups
 
 
-def salvage_correction(outcome):
-    """An answer that only needed one correction for naming tools that didn't run (usually in
-    its next steps) is kept in its corrected form, as if written first: the first answer and
-    the correction message are dropped, and the corrected answer keeps the first turn's thinking
-    (the corrected turn's thinking is about the correction). Returns the outcome, changed in
-    place, or a rejection reason."""
-    checks = outcome["stats"].get("checks") or []
-    if len(checks) != 2 or verify.has_problems(checks[1]["problems"]):
-        return "still failed the check after its correction"
-    if checks[0]["problems"].get("verdict") or checks[0]["problems"].get("unknown_citations"):
-        return "needed a correction for verdict language or unknown citations"
-    msgs = outcome["messages"]
-    if len(msgs) < 3 or msgs[-1]["role"] != "assistant" or msgs[-2]["role"] != "user" \
-            or msgs[-3]["role"] != "assistant" or msgs[-3].get("tool_calls"):
-        return "correction turn has an unexpected shape"
-    first, corrected = msgs[-3], msgs[-1]
-    if corrected.get("tool_calls"):
-        return "the correction made it call more tools"
-    fixed = {"role": "assistant", "content": corrected.get("content") or ""}
+_NEXT_STEPS = re.compile(r"^\s*(?:#+\s*)?\**\s*next steps?\b", re.IGNORECASE)
+_STEP = re.compile(r"^(\s*)\d+\.\s+")
+
+
+def clean_next_steps(answer, ran, available):
+    """The base model often recommends a tool in its next steps ("search the hash on
+    VirusTotal") without having run it. That is advice, not an invented claim, but the check
+    flags it and training on it teaches recommending instead of calling. Drop those step lines
+    (renumbering the rest); if none remain, drop the section. Claims elsewhere stay as they are.
+    Returns the cleaned answer, or None if it still fails the check."""
+    lines = (answer or "").splitlines()
+    start = next((i for i, line in enumerate(lines) if _NEXT_STEPS.match(line)), None)
+    if start is not None:
+        head, steps = lines[:start + 1], lines[start + 1:]
+        unrun = lambda line: [t for t in verify.tools_mentioned(line, available) if t not in ran]
+        kept = [line for line in steps if not unrun(line)]
+        n = 0
+        renumbered = []
+        for line in kept:
+            if _STEP.match(line):
+                n += 1
+                line = _STEP.sub(lambda m: f"{m.group(1)}{n}. ", line, count=1)
+            renumbered.append(line)
+        if any(line.strip() for line in renumbered):
+            lines = head + renumbered
+        else:
+            lines = lines[:start]
+            while lines and not lines[-1].strip():
+                lines.pop()
+    cleaned = "\n".join(lines).rstrip()
+    if verify.has_problems(verify.check_answer(cleaned, ran, available)):
+        return None
+    return cleaned
+
+
+def pick_answer(outcome):
+    """The answer to train on: the first answer (with its own thinking), cleaned of next steps
+    that name unrun tools; failing that, the answer after one correction (with the first turn's
+    thinking). Rewrites outcome["messages"] and ["explanation"]; returns a rejection reason or None."""
+    msgs, stats = outcome["messages"], outcome["stats"]
+    ran = outcome["agent_run"]["selected_tools"]
+    available = outcome["agent_run"]["available_tools"]
+    corrected = bool(stats.get("corrections"))
+    if corrected:
+        if len(msgs) < 3 or msgs[-2]["role"] != "user" or msgs[-3]["role"] != "assistant" \
+                or msgs[-3].get("tool_calls") or msgs[-1].get("tool_calls"):
+            return "correction turn has an unexpected shape"
+        first, last = msgs[-3], msgs[-1]
+        prefix = msgs[:-3]
+    else:
+        first = last = msgs[-1]
+        prefix = msgs[:-1]
+    choice = clean_next_steps(first.get("content"), ran, available)
+    if choice is None and corrected:
+        choice = clean_next_steps(last.get("content"), ran, available)
+    if choice is None:
+        problems = verify.check_answer(last.get("content") or "", ran, available)
+        return f"fails the check even without its next steps: {problems}"
+    fixed = {"role": "assistant", "content": choice}
     if first.get("thinking"):
         fixed["thinking"] = first["thinking"]
-    outcome["messages"] = msgs[:-3] + [fixed]
-    return outcome
+    outcome["messages"] = prefix + [fixed]
+    outcome["explanation"] = choice
+    return None
 
 
 def judge(job, outcome, system_prompt):
@@ -189,10 +230,9 @@ def judge(job, outcome, system_prompt):
         return f"reasoning was cut off ({stats['cutoffs']} nudge)"
     if stats.get("auto_run"):
         return f"Malworn ran {stats['auto_run']} for it"
-    if stats.get("corrections"):
-        salvaged = salvage_correction(outcome)
-        if isinstance(salvaged, str):
-            return salvaged
+    reason = pick_answer(outcome)
+    if reason:
+        return reason
     answer = outcome["explanation"] or ""
     if stats.get("invalid_calls") or stats.get("repeat_calls"):
         return "invalid or repeated tool call"
@@ -400,6 +440,8 @@ def main(argv=None):
             record["example"] = {"messages": to_training_messages(outcome["messages"]), "meta": meta}
         else:
             record["rejected"] = reason
+            if outcome:
+                record["answer"] = (outcome.get("explanation") or "")[:4000]
         with open(raw_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         elapsed = time.monotonic() - started
