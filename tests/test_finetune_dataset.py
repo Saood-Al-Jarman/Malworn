@@ -137,3 +137,11 @@ def test_capa_answer_uses_count_the_model_sees():
     empty = {"status": "success", "data": {"summary": "0 capabilities.", "capabilities": [],
                                             "attack_techniques": [], "look_for_next": []}}
     assert "no capabilities" in answer_part("capa", empty, "attack")
+
+
+def test_every_corpus_file_gets_a_triage_example_when_sampling(corpus, tmp_path):
+    """v1 had only 9 triage (multi-tool) examples and missed every O3 triage question."""
+    _, rows, _ = build(corpus, tmp_path, per_file=3)
+    corpus_files = {r["meta"]["file"] for r in rows if r["meta"]["source"] == "corpus"}
+    triaged = {r["meta"]["file"] for r in rows if r["meta"]["source"] == "corpus" and r["meta"]["type"] == "triage"}
+    assert corpus_files and triaged == corpus_files

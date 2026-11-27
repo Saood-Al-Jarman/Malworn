@@ -355,28 +355,33 @@ def test_check_passes_a_clean_answer_without_a_correction(fake_ollama, sample):
     assert len(FakeOllama.received) == 2
 
 
-def test_check_makes_the_model_call_a_tool_it_cited(fake_ollama, sample):
+def test_check_runs_the_tools_an_answer_cited(fake_ollama, sample):
+    """An answer credits facts to tools that never ran: Malworn runs them itself and the
+    model rewrites from the real results (the tuned model invented tool output, Nov 27)."""
     FakeOllama.script = [
         call("file_type"),
-        answer("No URLs [strings]. Next: compute the imphash [extra_checks]."),
-        call("strings"),                                   # the correction turn: it calls one tool
-        answer("It contains a URL [strings]."),            # and drops the other claim
+        answer("No URLs [strings]. The imphash is abc [extra_checks]."),
+        answer("It contains a URL [strings]; the imphash is in [extra_checks]."),
     ]
     outcome = run(sample, fake_ollama, check=True)
 
-    correction = FakeOllama.received[2]["messages"][-1]["content"]
-    assert "strings, extra_checks" in correction and "not run" in correction
-    assert outcome["explanation"] == "It contains a URL [strings]."
-    assert outcome["agent_run"]["selected_tools"] == ["file_type", "strings"]
+    sent = FakeOllama.received[2]["messages"]
+    assert "Malworn has now run them" in sent[-4]["content"]           # correction, then the results
+    assert sent[-3]["role"] == "assistant" and len(sent[-3]["tool_calls"]) == 2
+    assert [m.get("tool_name") for m in sent[-2:]] == ["strings", "extra_checks"]
+    assert outcome["explanation"] == "It contains a URL [strings]; the imphash is in [extra_checks]."
+    assert outcome["agent_run"]["selected_tools"] == ["file_type", "strings", "extra_checks"]
+    assert outcome["agent_run"]["auto_run_tools"] == ["strings", "extra_checks"]
     stats = outcome["stats"]
-    assert stats["corrections"] == 1
+    assert stats["corrections"] == 1 and stats["auto_run"] == ["strings", "extra_checks"]
     assert [bool(c["problems"]["cited_not_run"]) for c in stats["checks"]] == [True, False]
 
 
 def test_check_gives_one_correction_only(fake_ollama, sample):
     FakeOllama.script = [answer("Looks legitimate [strings]."), answer("Still legitimate [strings].")]
     outcome = run(sample, fake_ollama, check=True)
-    assert outcome["explanation"] == "Still legitimate [strings]."
+    assert outcome["explanation"].startswith("Still legitimate [strings].")
+    assert outcome["explanation"].endswith(loop.UNVERIFIED_NOTE)       # shown with a warning
     assert len(FakeOllama.received) == 2
     last = outcome["stats"]["checks"][-1]
     assert last["problems"]["verdict"] and not last["corrected"]   # recorded as still failing

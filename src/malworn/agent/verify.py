@@ -152,10 +152,20 @@ def has_problems(problems):
     return any(problems.values())
 
 
-def correction_message(problems):
-    """What the model is told when its answer fails the check."""
+def correction_message(problems, auto_ran=()):
+    """What the model is told when its answer fails the check. ``auto_ran``: cited tools
+    that Malworn has now run itself; their results follow this message."""
     lines = ["Before your answer is shown to the analyst, it was checked against this analysis:"]
-    if problems["cited_not_run"]:
+    if auto_ran:
+        names = ", ".join(auto_ran)
+        lines.append(f"- You cite or mention {names}, but these tools had not been run, so those claims "
+                     "had no evidence behind them. Malworn has now run them; their results follow. "
+                     "Use only what those results show, and remove anything they do not support.")
+        rest = [t for t in problems["cited_not_run"] if t not in auto_ran]
+        if rest:
+            lines.append(f"- You also mention {', '.join(rest)}, which did not run: remove every claim "
+                         "and citation that depends on them.")
+    elif problems["cited_not_run"]:
         names = ", ".join(problems["cited_not_run"])
         lines.append(f"- You cite or mention {names}, but these tools were not run in this analysis. "
                      "Call them now if they are relevant (do not recommend a tool you can call), "

@@ -575,8 +575,10 @@ def build(files, out_dir, seed=1, extra_questions=None, exclude_hashes=(), per_f
         applicable = [q for q, v in QUESTION_TYPES.items()
                       if (pe or not v["pe_only"]) and q not in skip_types]
         if per_file:
-            # ATT&CK (capa) is the newest behaviour, so every PE gets one; the rest are sampled
-            must = [q for q in ("attack",) if q in applicable]
+            # Every file gets ATT&CK (capa, the newest behaviour) and triage (the multi-tool
+            # pattern: v1 had 9 triage examples and missed 4/4 triage questions in O3, Nov 27);
+            # the rest are sampled
+            must = [q for q in ("attack", "triage") if q in applicable]
             rest = [q for q in applicable if q not in must]
             applicable = must + random.sample(rest, max(0, min(per_file - len(must), len(rest))))
         for qtype in applicable:

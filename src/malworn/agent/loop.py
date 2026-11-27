@@ -265,6 +265,7 @@ def run_agent(
         "core_tools": core_names,
         "checks": state["checks"],
         "corrections": sum(1 for c in state["checks"] if c["corrected"]),
+        "auto_run": list(state.get("auto_run", [])),
         "cutoffs": state.get("cutoffs", 0),
         "output_tokens": sum((t.get("output_tokens") or 0) for t in state["turns"]),
         "seconds": round(time.monotonic() - started, 1),
@@ -302,18 +303,33 @@ def build_agent_run(info, tools, state, explanation):
         "file": info,
         "available_tools": [t.name for t in tools],
         "selected_tools": list(state["selected"]),
+        "auto_run_tools": list(state.get("auto_run", [])),
         "tool_results": [state["results"][name].to_dict() for name in state["selected"]],
         "agent_explanation": explanation,
     }
 
 
-def converse_checked(state, path, tools, check=True, max_corrections=1, emit=None, **kwargs):
+UNVERIFIED_NOTE = ("\n\n> Note: Malworn's automatic check still found problems in this answer after a "
+                   "correction (claims credited to tools that did not run, or verdict language). Check "
+                   "each claim against the tool results before relying on it.")
+
+
+def converse_checked(state, path, tools, check=True, max_corrections=1, emit=None, auto_run=True, **kwargs):
     """converse(), then check the answer (agent.verify) and, if it fails, give
     the model up to ``max_corrections`` turns to fix it. Every check is
-    recorded in state["checks"]."""
+    recorded in state["checks"].
+
+    ``auto_run``: if the answer credits facts to tools that never ran, Malworn runs
+    those tools itself (they are read-only and never execute the sample) and gives
+    the model their real results to rewrite from, instead of only asking it to.
+    The fine-tuned model (Nov 27) sometimes skipped a tool and invented its output;
+    this makes the fix deterministic. Tools run this way are listed in
+    state["auto_run"], so evaluations still score only the model's own choices.
+    An answer that still fails after the last correction gets UNVERIFIED_NOTE."""
     from malworn.agent import verify
 
     emit = emit or (lambda kind, payload: None)
+    state.setdefault("auto_run", [])
     answer = converse(state, path, tools, emit=emit, **kwargs)
     if not check:
         return answer
@@ -324,11 +340,21 @@ def converse_checked(state, path, tools, check=True, max_corrections=1, emit=Non
         state["checks"].append({"attempt": attempt, "problems": problems,
                                 "corrected": failed and attempt < max_corrections})
         emit("check", problems)
-        if not failed or attempt == max_corrections:
+        if not failed:
             return answer
-        state["messages"].append({"role": "user", "content": verify.correction_message(problems)})
+        if attempt == max_corrections:
+            break
+        to_run = [n for n in problems["cited_not_run"] if n in names and n not in state["results"]]
+        if auto_run and to_run:
+            state["messages"].append({"role": "user",
+                                      "content": verify.correction_message(problems, auto_ran=to_run)})
+            run_core_tools(state, path, tools, to_run, emit)
+            state["auto_run"].extend(to_run)
+            emit("auto_run", to_run)
+        else:
+            state["messages"].append({"role": "user", "content": verify.correction_message(problems)})
         answer = converse(state, path, tools, emit=emit, **kwargs)
-    return answer
+    return (answer or "") + UNVERIFIED_NOTE
 
 
 def converse(state, path, tools, base_url=DEFAULT_OLLAMA_URL, model=DEFAULT_MODEL, think=True,

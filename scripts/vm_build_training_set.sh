@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SRC="${1:?usage: bash scripts/vm_build_training_set.sh <malworn-train.zip or the malworn-train folder>}"
 WORK="$HOME/malworn-train"
-PER_FILE="${PER_FILE:-5}"
+PER_FILE="${PER_FILE:-6}"   # 5 until Nov 27 (v1)
 
 if [ "${MALWORN_VT_MODE:-}" = "mock" ]; then
   echo "FAIL: MALWORN_VT_MODE=mock is set; run  unset MALWORN_VT_MODE  so VirusTotal answers are real"; exit 1

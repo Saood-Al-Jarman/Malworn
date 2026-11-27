@@ -108,6 +108,7 @@ def summarize(rows, configs):
             "mean_unnecessary": round(sum(len(r["unnecessary"]) for r in mine) / n, 2),
             "citing_unrun_final": sum(1 for r in mine if r["cited_not_run_final"]),
             "verdict_final": sum(1 for r in mine if r["verdict_final"]),
+            "auto_run": sum(1 for r in mine if r.get("auto_run")),
             "mean_seconds": round(sum(r["seconds"] for r in mine) / n, 1),
         }
     return out
@@ -129,6 +130,7 @@ def write_summary(path, summary, rows, configs, files, model):
     row("Mean unnecessary tools per question", lambda s: f"{s['mean_unnecessary']}")
     row("Answers citing tools that never ran", lambda s: f"{s['citing_unrun_final']}/{s['runs']}")
     row("Answers with verdict language", lambda s: f"{s['verdict_final']}/{s['runs']}")
+    row("Answers where Malworn ran a cited tool itself", lambda s: f"{s.get('auto_run', 0)}/{s['runs']}")
     row("Mean seconds per question", lambda s: f"{s['mean_seconds']}")
 
     lines += ["", "## Each question", "",
@@ -202,14 +204,16 @@ def main(argv=None):
                     except Exception as exc:  # noqa: BLE001
                         rows.append({**base, "error": f"{type(exc).__name__}: {exc}"})
                         continue
-                    selected = outcome["agent_run"]["selected_tools"]
-                    final = verify.check_answer(outcome["explanation"], selected, available)
+                    ran = outcome["agent_run"]["selected_tools"]
+                    auto = outcome["agent_run"].get("auto_run_tools", [])
+                    selected = [t for t in ran if t not in auto]     # O3 scores the model's own choices
+                    final = verify.check_answer(outcome["explanation"], ran, available)
                     folder = f"{Path(file).stem}_{config.replace('+', '-')}_{q['id']}_seed{seed}"
                     save_outputs(outcome, out_dir / folder, html=False)
                     row = {**base, "question": q["question"], "selected": selected,
                            **score_selection(q, selected),
                            "cited_not_run_final": final["cited_not_run"], "verdict_final": final["verdict"],
-                           "corrections": outcome["stats"].get("corrections", 0),
+                           "corrections": outcome["stats"].get("corrections", 0), "auto_run": auto,
                            "seconds": outcome["stats"]["seconds"], "folder": folder}
                     rows.append(row)
                     print(f"    -> {'correct' if row['correct'] else 'MISSED ' + str(row['missing_groups'])}"
