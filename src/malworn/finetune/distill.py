@@ -157,11 +157,43 @@ def required_groups(qtype):
     return groups
 
 
+def salvage_correction(outcome):
+    """An answer that only needed one correction for naming tools that didn't run (usually in
+    its next steps) is kept in its corrected form, as if written first: the first answer and
+    the correction message are dropped, and the corrected answer keeps the first turn's thinking
+    (the corrected turn's thinking is about the correction). Returns the outcome, changed in
+    place, or a rejection reason."""
+    checks = outcome["stats"].get("checks") or []
+    if len(checks) != 2 or verify.has_problems(checks[1]["problems"]):
+        return "still failed the check after its correction"
+    if checks[0]["problems"].get("verdict") or checks[0]["problems"].get("unknown_citations"):
+        return "needed a correction for verdict language or unknown citations"
+    msgs = outcome["messages"]
+    if len(msgs) < 3 or msgs[-1]["role"] != "assistant" or msgs[-2]["role"] != "user" \
+            or msgs[-3]["role"] != "assistant" or msgs[-3].get("tool_calls"):
+        return "correction turn has an unexpected shape"
+    first, corrected = msgs[-3], msgs[-1]
+    if corrected.get("tool_calls"):
+        return "the correction made it call more tools"
+    fixed = {"role": "assistant", "content": corrected.get("content") or ""}
+    if first.get("thinking"):
+        fixed["thinking"] = first["thinking"]
+    outcome["messages"] = msgs[:-3] + [fixed]
+    return outcome
+
+
 def judge(job, outcome, system_prompt):
     """None if the answer is a good training example, else the reason it is not."""
-    stats, answer = outcome["stats"], outcome["explanation"] or ""
-    if stats.get("corrections") or stats.get("cutoffs") or stats.get("auto_run"):
-        return "needed a correction, cutoff nudge or a tool run for it"
+    stats = outcome["stats"]
+    if stats.get("cutoffs"):
+        return f"reasoning was cut off ({stats['cutoffs']} nudge)"
+    if stats.get("auto_run"):
+        return f"Malworn ran {stats['auto_run']} for it"
+    if stats.get("corrections"):
+        salvaged = salvage_correction(outcome)
+        if isinstance(salvaged, str):
+            return salvaged
+    answer = outcome["explanation"] or ""
     if stats.get("invalid_calls") or stats.get("repeat_calls"):
         return "invalid or repeated tool call"
     selected = outcome["agent_run"]["selected_tools"]
@@ -262,7 +294,7 @@ def run_job(job, args, tools):
     options = {"seed": args.seed}
     return run_agent(job["path"], request=job["request"], original_name=job.get("original_name"),
                      base_url=args.ollama, model=args.model, prompt=args.prompt, tools=tools,
-                     preset=job["preset"], check=True, options=options)
+                     preset=job["preset"], check=True, auto_run=False, options=options)
 
 
 def job_key(job):

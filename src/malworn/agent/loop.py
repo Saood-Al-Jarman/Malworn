@@ -202,6 +202,7 @@ def run_agent(
     options=None,
     preset="all",
     core=None,
+    auto_run=True,
 ):
     """Run the agent on one file. Returns a dict with the agent run (the input
     to Hassan's aggregator), the aggregated report, the transcript and stats.
@@ -246,7 +247,7 @@ def run_agent(
     started = time.monotonic()
     if core_names:
         run_core_tools(state, path, tools, core_names, emit)
-    explanation = converse_checked(state, path, tools, check=check, base_url=base_url, model=model,
+    explanation = converse_checked(state, path, tools, check=check, auto_run=auto_run, base_url=base_url, model=model,
                                    think=think, max_tool_calls=max_tool_calls, num_ctx=num_ctx,
                                    timeout=timeout, emit=emit, options=options)
 
