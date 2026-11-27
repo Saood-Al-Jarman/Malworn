@@ -95,7 +95,7 @@ def to_training_messages(messages):
 
 
 # --- the filter -----------------------------------------------------------------------------
-_NUMBER = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\w])")
+_NUMBER = re.compile(r"(?<![\w.\-])\d[\d,]*(?:\.\d+)?(?![\w])")
 _HEX = re.compile(r"\b[0-9a-fA-F]{32,64}\b")
 _PLACEHOLDER = re.compile(r"\b(?:of|is|are) [MNXY]\b|\b[MNXY] of \d|\b[MNXY] (?:VirusTotal )?engines\b"
                           r"|\bthreat label: X\b|<[a-z_]+>", re.IGNORECASE)

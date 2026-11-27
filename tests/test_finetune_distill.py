@@ -97,7 +97,7 @@ def test_next_steps_naming_unrun_tools_are_dropped_not_the_answer():
     o = outcome(answer, sel, res)
     assert d.judge(TRIAGE, o, SYSTEM) is None
     assert o["explanation"].endswith("Next steps:\n1. Search the SHA-256 in your sources.")
-    only = GOOD + "\n\nNext steps:\n1. Run capa."
+    only = GOOD + "\n\nNext steps:\n1. Run [capa]."
     assert d.clean_next_steps(only, sel, TOOLS) == GOOD
     claim = "The imports include CreateRemoteThread [imports]. " + GOOD
     assert "fails the check" in d.judge(TRIAGE, outcome(claim, sel, res), SYSTEM)
