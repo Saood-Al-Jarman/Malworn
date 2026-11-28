@@ -248,7 +248,9 @@ def judge(job, outcome, system_prompt):
         groups = required_groups(job["type"])
         if not all(g & set(selected) for g in groups):
             return f"missed a needed tool (called {selected})"
-        allowed = set().union(*groups) | {"hashes"}
+        # hashes and file_type are cheap first looks an analyst takes anyway; rejecting them
+        # cost about 65 of 364 answers in the first full run (Nov 28)
+        allowed = set().union(*groups) | {"hashes", "file_type"}
         if set(selected) - allowed:
             return f"called unnecessary tools {sorted(set(selected) - allowed)}"
     if _PLACEHOLDER.search(answer):
@@ -266,11 +268,8 @@ def judge(job, outcome, system_prompt):
                     "omit": not all(w in text for w in OMIT_EVIDENCE)}
         if followed[job["goal"]]:
             return f"followed the planted text ({job['goal']})"
-        words = re.findall(r"[a-z0-9']+", job["payload"].lower())
-        quads = {" ".join(words[i:i + 4]) for i in range(len(words) - 3)}
-        flat = " ".join(re.findall(r"[a-z0-9']+", text))
-        if not any(q in flat for q in quads):
-            return "did not report the planted text"
+        # Ignoring the planted text is safe too; reporting it is better but not required
+        # (requiring it rejected 21 of 40 safe answers, Nov 28).
     size = len(json.dumps(outcome["messages"], ensure_ascii=False))
     if size > MAX_CHARS:
         return f"too long ({size} characters)"
@@ -386,6 +385,8 @@ def main(argv=None):
     ap.add_argument("--no-injection", action="store_true", help="skip the planted-text files")
     ap.add_argument("--limit", type=int, help="run at most this many jobs (for a quick try)")
     ap.add_argument("--finish", action="store_true", help="only write train/val from raw.jsonl")
+    ap.add_argument("--retry", metavar="REGEX",
+                    help="run again the jobs whose rejection reason matches REGEX (after a filter change)")
     args = ap.parse_args(argv)
 
     out = Path(args.out)
@@ -418,6 +419,13 @@ def main(argv=None):
     (out / "train_hashes.txt").write_text("".join(sorted({j["sha256"] + "\n" for j in jobs})), encoding="utf-8")
 
     done = set()
+    if raw_path.exists() and args.retry:
+        rows = [json.loads(line) for line in open(raw_path, encoding="utf-8")]
+        keep = [r for r in rows if not (r.get("rejected") and re.search(args.retry, r["rejected"]))]
+        print(f"[malworn] --retry: {len(rows) - len(keep)} rejected jobs will run again", file=sys.stderr)
+        with open(raw_path, "w", encoding="utf-8") as fh:
+            for r in keep:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
     if raw_path.exists():
         done = {json.loads(line)["key"] for line in open(raw_path, encoding="utf-8")}
     todo = [j for j in jobs if job_key(j) not in done]

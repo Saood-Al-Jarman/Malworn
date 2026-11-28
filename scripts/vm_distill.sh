@@ -20,5 +20,5 @@ for need in "Model" "VirusTotal" "Detect It Easy" "capa"; do
 done
 [ -f "$WORK/manifest.csv" ] || { echo "FAIL: no $WORK/manifest.csv: run scripts/vm_build_training_set.sh first"; exit 1; }
 PYTHONPATH=src python3 -m malworn.finetune.distill "$WORK/manifest.csv" --out data/finetune_v3 \
-  --exclude-hashes data/test_hashes.txt --per-file "${PER_FILE:-5}" ${LIMIT:+--limit "$LIMIT"}
+  --exclude-hashes data/test_hashes.txt --per-file "${PER_FILE:-5}" ${LIMIT:+--limit "$LIMIT"} ${RETRY:+--retry "$RETRY"}
 echo "Done. Dataset in data/finetune_v3 (stats.md, train.jsonl, val.jsonl)."
